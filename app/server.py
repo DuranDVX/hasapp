@@ -10,6 +10,7 @@ from contextlib import asynccontextmanager
 from collections import defaultdict, deque
 from datetime import date, datetime, timedelta
 from pathlib import Path
+from urllib.parse import urlparse
 from zoneinfo import ZoneInfo
 
 from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
@@ -62,8 +63,15 @@ SECURITY_HEADERS = {
 }
 
 
+CANONICAL = (urlparse(config.PUBLIC_URL).hostname or "").lower()
+
+
 @app.middleware("http")
 async def _headers(request: Request, call_next):
+    host = request.headers.get("host", "").split(":")[0].lower()
+    if CANONICAL.startswith("www.") and host == CANONICAL[4:]:   # one address for everyone: www
+        q = f"?{request.url.query}" if request.url.query else ""
+        return RedirectResponse(f"https://{CANONICAL}{request.url.path}{q}", status_code=301)
     resp = await call_next(request)
     for k, v in SECURITY_HEADERS.items():
         resp.headers.setdefault(k, v)

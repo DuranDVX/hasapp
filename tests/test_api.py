@@ -276,3 +276,10 @@ def test_sync_lists_todays_risk_ids(co):
     client.post("/api/records", json=task_sheet(co) | {"record_date": server.today().isoformat()}, headers=co["h"])
     d = client.get(f"/api/sync?site_id={co['site']['id']}", headers=co["h"]).json()
     assert co["risks"][0]["id"] in d["today_risk_ids"]
+
+
+def test_bare_domain_redirects_to_www(monkeypatch):
+    monkeypatch.setattr(server, "CANONICAL", "www.sitebakkie.co.za")
+    r = client.get("/app.html?x=1", headers={"host": "sitebakkie.co.za"}, follow_redirects=False)
+    assert r.status_code == 301 and r.headers["location"] == "https://www.sitebakkie.co.za/app.html?x=1"
+    assert client.get("/api/health", headers={"host": "www.sitebakkie.co.za"}).status_code == 200

@@ -1,0 +1,13 @@
+; SiteBakkie DNS for Cloudflare: import with "Import DNS Records".
+; Untick "Proxy imported DNS records": every record must be DNS only (grey cloud).
+$ORIGIN sitebakkie.co.za.
+$TTL 3600
+
+; website (Railway). Cloudflare allows a CNAME on the root domain.
+@                    IN CNAME e9zu8ua6.up.railway.app.
+www                  IN CNAME 366w2pxx.up.railway.app.
+_railway-verify      IN TXT   "railway-verify=ea3a6ecf3a176d5a23f5b3e9667df30cb2eb5ff2b601e7f585b906daee35a58b"
+_railway-verify.www  IN TXT   "railway-verify=586d741a6a2794fbbf16f4562a4fdacc290a6e8c08c1c58a74c7c5eda8badbdd"
+
+; email: add later (Google Workspace MX/SPF, and Resend for app emails), like quotebakkie.co.za
+_dmarc               IN TXT   "v=DMARC1; p=none;"
