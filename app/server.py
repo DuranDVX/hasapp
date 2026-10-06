@@ -47,7 +47,8 @@ async def _lifespan(_app):
 
 app = FastAPI(title=config.APP_NAME, docs_url=None, redoc_url=None, openapi_url=None, lifespan=_lifespan)
 SA = ZoneInfo("Africa/Johannesburg")
-SIGNUP_CODE = os.getenv("HAS_SIGNUP_CODE", "")   # set during the pilot: sign-up by invite only
+# Pilot: sign-up by invite only. Comma-separated codes, one per person, so each can be switched off.
+SIGNUP_CODE = {c.strip().lower() for c in os.getenv("HAS_SIGNUP_CODE", "").split(",") if c.strip()}
 
 
 def today() -> date:
@@ -272,7 +273,7 @@ def health():
 
 @app.post("/api/signup")
 def signup(body: dict = Body(...)):
-    if SIGNUP_CODE and _s(body.get("invite")) != SIGNUP_CODE:
+    if SIGNUP_CODE and _s(body.get("invite")).lower() not in SIGNUP_CODE:
         raise HTTPException(403, "Sign-up needs an invite code during the pilot.")
     email = _s(body.get("email")).lower()
     if "@" not in email or not _s(body.get("company")) or not _s(body.get("name")):
@@ -291,6 +292,8 @@ def signup(body: dict = Body(...)):
             s.add(db.RiskItem(company_id=c.id, activity=r["activity"], hazards=r["hazards"],
                               ppe=r["ppe"], source="starter"))
         s.flush()
+        if SIGNUP_CODE:
+            log.info("sign-up %s with invite %s", c.name, _s(body.get("invite")).lower())
         return {"token": auth.new_session(s, u)}
 
 

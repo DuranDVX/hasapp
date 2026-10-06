@@ -266,10 +266,12 @@ def test_cron_expiry_requires_token():
 
 
 def test_invite_code_when_set(monkeypatch):
-    monkeypatch.setattr(server, "SIGNUP_CODE", "pilot")
+    monkeypatch.setattr(server, "SIGNUP_CODE", {"pilot", "john-ab12"})
     body = {"company": "X", "name": "Y", "email": f"{uuid.uuid4().hex[:8]}@test.co", "password": "longenough"}
     assert client.post("/api/signup", json=body).status_code == 403
     assert client.post("/api/signup", json=body | {"invite": "pilot"}).status_code == 200
+    body["email"] = f"{uuid.uuid4().hex[:8]}@test.co"
+    assert client.post("/api/signup", json=body | {"invite": "John-AB12 "}).status_code == 200
 
 
 def test_sync_lists_todays_risk_ids(co):
