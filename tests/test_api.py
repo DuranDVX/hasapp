@@ -317,6 +317,10 @@ def _platform_admin():
     client.put(f"/api/admin/companies/{co_['id']}", json={"active": False}, headers=a)
     assert client.get("/api/me", headers={"X-Token": tok}).status_code == 401
     assert client.post("/api/login", json={"email": email, "password": temp}).status_code == 401
+    r = client.post("/api/admin/companies", json={"name": "JB Test", "owner": "Jo", "email": "Jo@JBtest.co"}, headers=a).json()
+    assert r["email"] == "jo@jbtest.co"
+    assert client.post("/api/login", json={"email": "jo@jbtest.co", "password": r["temp_password"]}).status_code == 200
+    assert client.post("/api/admin/companies", json={"name": "Again", "owner": "Jo", "email": "jo@jbtest.co"}, headers=a).status_code == 409
     client.put(f"/api/admin/invites/{code}", json={"active": False}, headers=a)
     r = client.post("/api/signup", json={"company": "X", "name": "Y", "email": f"{uuid.uuid4().hex[:8]}@t.co",
                                          "password": "longenough", "invite": code})

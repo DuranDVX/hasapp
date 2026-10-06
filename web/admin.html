@@ -64,6 +64,10 @@ async function load() {
       <div class="row" style="margin-top:10px"><input id="inv-label" placeholder="Who is it for? (e.g. Pieter, Plett Builders)" style="margin:0"><button class="small primary" id="inv-add">New code</button></div>
       <div id="inv-out"></div></div>
     <h2>Companies (${D.companies.length})</h2>
+    <details class="card"><summary><b>+ New company</b> <span class="muted small">(make the account for them; they get a temporary password)</span></summary>
+      <div class="grid2" style="margin-top:8px"><input id="nc-name" placeholder="Company name (e.g. JB Civils)"><input id="nc-owner" placeholder="Owner's name"></div>
+      <input id="nc-email" type="email" placeholder="Owner's email" autocapitalize="off" autocorrect="off">
+      <button class="small primary" id="nc-add">Make company</button><div id="nc-out"></div></details>
     ${D.companies.map((c) => `<div class="card ${c.active ? "" : "off"}">
       <div class="row between wrap"><div><b style="font-size:18px">${esc(c.name)}</b> ${c.active ? "" : '<span class="badge bad">Switched off</span>'}
         <div class="muted small">Signed up ${fmt(c.created_at)} · invite ${esc(c.invite || "-")} · ${c.sites} site(s) · ${c.workers} worker(s) · ${c.records} record(s), ${c.records_7d} this week · last activity ${fmt(c.last_activity)}</div></div>
@@ -94,6 +98,12 @@ document.addEventListener("click", async (e) => {
       await api(`/api/admin/companies/${b.dataset.co}`, { method: "PUT", json: { active: b.dataset.on === "1" } }); load();
     } else if (b.dataset.inv) {
       await api(`/api/admin/invites/${encodeURIComponent(b.dataset.inv)}`, { method: "PUT", json: { active: b.dataset.on === "1" } }); load();
+    } else if (b.id === "nc-add") {
+      const r = await api("/api/admin/companies", { json: { name: $("#nc-name").value, owner: $("#nc-owner").value, email: $("#nc-email").value.trim() } });
+      await load();
+      const msg = `Your SiteBakkie login is ready.\nOpen ${location.origin}/app.html\nEmail: ${r.email}\nTemporary password: ${r.temp_password}\nChange it under More → My profile.`;
+      $("#view").insertAdjacentHTML("afterbegin", `<div class="note ok"><b>Company made.</b> Send this to the owner:<pre style="white-space:pre-wrap;margin:8px 0 0">${esc(msg)}</pre></div>`);
+      scrollTo(0, 0);
     } else if (b.id === "inv-add") {
       const r = await api("/api/admin/invites", { json: { label: $("#inv-label").value } });
       await load(); $("#inv-out").innerHTML = `<div class="note ok">New code: <b>${esc(r.code)}</b>. Sign-up page: ${location.origin}/app.html#signup</div>`;

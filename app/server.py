@@ -274,6 +274,20 @@ def health():
     return {"ok": True, "app": config.APP_NAME}
 
 
+def _new_company(s, name: str, owner: str, email: str, password: str, invite: str = ""):
+    """One company with its owner login and the starter risk library."""
+    c = db.Company(name=name, email=email, invite=invite)
+    s.add(c)
+    s.flush()
+    u = db.User(company_id=c.id, email=email, name=owner, role="owner", pw_hash=auth.hash_pw(password))
+    s.add(u)
+    for r in library.STARTER_RISKS:
+        s.add(db.RiskItem(company_id=c.id, activity=r["activity"], hazards=r["hazards"],
+                          ppe=r["ppe"], source="starter"))
+    s.flush()
+    return c, u
+
+
 @app.post("/api/signup")
 def signup(body: dict = Body(...)):
     invite = _s(body.get("invite")).lower()
@@ -290,19 +304,10 @@ def signup(body: dict = Body(...)):
     with db.session() as s:
         if s.scalar(select(db.User).where(db.User.email == email)):
             raise HTTPException(409, "That email already has an account. Log in instead.")
-        c = db.Company(name=_s(body["company"]), email=email, invite=invite)
         ic = s.get(db.InviteCode, invite) if invite else None
         if ic:
             ic.uses = (ic.uses or 0) + 1
-        s.add(c)
-        s.flush()
-        u = db.User(company_id=c.id, email=email, name=_s(body["name"]), role="owner",
-                    pw_hash=auth.hash_pw(body["password"]))
-        s.add(u)
-        for r in library.STARTER_RISKS:
-            s.add(db.RiskItem(company_id=c.id, activity=r["activity"], hazards=r["hazards"],
-                              ppe=r["ppe"], source="starter"))
-        s.flush()
+        c, u = _new_company(s, _s(body["company"]), _s(body["name"]), email, body["password"], invite)
         if invite:
             log.info("sign-up %s with invite %s", c.name, invite)
         return {"token": auth.new_session(s, u)}
@@ -315,7 +320,7 @@ def login(body: dict = Body(...)):
         u = s.scalar(select(db.User).where(db.User.email == email))
         if not u or not u.active or not auth.check_pw(body.get("password", ""), u.pw_hash):
             time.sleep(0.5)
-            raise HTTPException(401, "Wrong email or password.")
+            raise HTTPException(401, "Wrong email or password. New company? Tap \"Create an account\" first.")
         if not s.get(db.Company, u.company_id).active:
             raise HTTPException(401, "This company's account is switched off. Contact SiteBakkie.")
         u.last_login_at = db.utcnow()
@@ -1821,6 +1826,19 @@ def admin_update_company(cid: str, body: dict = Body(...)):
         if "name" in body and _s(body["name"]):
             c.name = _s(body["name"])
     return {"ok": True}
+
+
+@app.post("/api/admin/companies", dependencies=[Depends(admin)])
+def admin_add_company(body: dict = Body(...)):
+    email = _s(body.get("email")).lower()
+    if "@" not in email or not _s(body.get("name")) or not _s(body.get("owner")):
+        raise HTTPException(400, "Give the company name, the owner's name and email.")
+    temp = secrets.token_urlsafe(6)
+    with db.session() as s:
+        if s.scalar(select(db.User).where(db.User.email == email)):
+            raise HTTPException(409, "That email already has a login.")
+        c, u = _new_company(s, _s(body["name"]), _s(body["owner"]), email, temp, "admin")
+        return {"company_id": c.id, "email": u.email, "temp_password": temp}
 
 
 @app.post("/api/admin/users", dependencies=[Depends(admin)])
