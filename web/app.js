@@ -454,6 +454,7 @@ VIEWS.file = async () => {
         ${mine.map((d) => `<div class="row small" style="margin-top:6px"><a class="grow" href="${d.file_url}" target="_blank">📄 ${esc(d.title)}</a>
           ${d.expires ? `<span class="badge ${d.status === "expired" ? "bad" : d.status === "expiring" ? "warn" : "ok"}">exp ${esc(d.expires)}</span>` : ""}
           ${can.manage() ? `<button class="link" data-act="del-doc" data-id="${d.id}">Delete</button>` : ""}</div>`).join("")}
+        ${s.key === "hs_plan" ? `<button class="small primary" style="margin-top:8px;margin-right:6px" data-act="nav" data-to="hsplan">📘 Draft it in the app</button>` : ""}
         ${s.type.includes("upload") && can.manage() ? `<button class="small" style="margin-top:8px" data-act="add-doc" data-section="${s.key}" data-title="${esc(s.title)}">+ Upload</button>` : ""}</div>`;
     }).join("")}`);
 };
@@ -489,6 +490,7 @@ VIEWS.more = () => {
   const dark = (ls.get("ss-theme") || "light") === "dark";
   render(`${head("More", `${esc(u.name)} · ${esc(u.role_label)} · ${esc(S.me.company.name)}`)}
     <h2>This site</h2>
+    ${item("hsplan", "📘", "H&S plan", "The app drafts the site plan; a competent person signs; the client approves")}
     ${item("consultant", "📑", "Client documents", "Consultant's risk assessment and the client's specification")}
     ${item("setup", "⚙️", "Site setup", "What the site has: excavations, scaffolds, plant…", can.manage())}
     ${item("appointments", "📜", "Legal appointments", "Construction manager, supervisors, operators…")}

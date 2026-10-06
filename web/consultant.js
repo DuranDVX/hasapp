@@ -174,3 +174,72 @@ ACT["spec-confirm"] = (btn) => busy(btn, "Saving…", async () => {
   await api("/api/consultant/spec/confirm", { json: { site_id: S.siteId }, timeout: 180000 });
   SPEC_PREVIEW = null; await loadSite(true); toast("Specification in use. See the board.", "ok"); go("board");
 });
+
+// ---------------------------------------------------------------- H&S plan (CR 7(1)(a))
+// The app drafts the principal contractor's site plan from the client's spec, the
+// site and the risk assessment. A competent person checks it; the client approves it.
+
+VIEWS.hsplan = async () => {
+  if (needOnline()) return;
+  const r = await api("/api/hs-plan?site_id=" + S.siteId);
+  drawPlan(r);
+};
+function drawPlan(r) {
+  const p = r.plan, aesDoc = p?.aes, missing = r.inputs.filter((i) => !i.ok);
+  const status = aesDoc?.status === "signed" ? `<div class="note ok"><b>Approved plan on file.</b> Version ${p.version}, signed ${esc(aesDoc.signed_at)}. It is in the safety file.</div>`
+    : aesDoc ? `<div class="note warn"><b>Version ${p.version} is out for signature</b> since ${esc(aesDoc.created_at)}. Upload the signed copy when it comes back.
+        <button class="small" data-act="nav" data-to="aes" style="margin-top:6px">Open documents for signing</button></div>` : "";
+  render(`${head("H&S plan", "The principal contractor's site plan (CR 7(1)(a)). The app drafts it from the client's spec, the site and the risk assessment. A competent person checks and signs it; the client approves it.", "file")}
+    ${status}
+    <div class="card"><b>What the plan is built from</b>
+      ${r.inputs.map((i) => `<div class="row" style="margin-top:8px;align-items:flex-start"><span class="badge ${i.ok ? "ok" : "warn"}" style="flex:none">${i.ok ? "✓" : "!"}</span>
+        <div class="grow small"><b>${esc(i.label)}</b>${i.ok ? "" : `<div class="muted">${esc(i.detail)} <a href="#${i.action}">Fix</a></div>`}</div></div>`).join("")}
+      ${missing.length ? `<p class="small muted" style="margin-top:8px">You can draft now. Missing facts show in the plan as <b>[to complete]</b>.</p>` : ""}</div>
+    ${!p ? `<div class="card"><p>The app writes all ${r.sections.length} sections: scope, policy, appointments, risk assessment, training, inspections, site hazards, permits, PPE, contractors, incidents, emergencies, welfare, records and review.</p>
+        <p class="small muted">It takes about a minute. You can change any text before you issue it.</p></div>
+        ${can.manage() ? actionBar(`<button class="primary" data-act="plan-draft">✍️ Draft the plan</button>`) : ""}`
+      : planEditor(r)}`);
+}
+function planEditor(r) {
+  const p = r.plan, edit = can.manage() && p.aes?.status !== "signed";
+  return `${p.questions?.length ? `<div class="note warn"><b>The plan still needs:</b>${p.questions.map((q) => `<div>• ${esc(q)}</div>`).join("")}</div>` : ""}
+    <p class="small muted">Drafted ${esc((p.generated_at || "").replace("T", " "))} by ${esc(p.generated_by || "")}${p.edited_at ? ` · changed ${esc(p.edited_at.replace("T", " "))}` : ""}.
+      Lines that start with “## ” are headings; “- ” are bullet points.</p>
+    ${r.sections.map((s, i) => `<details class="card" ${i === 0 ? "open" : ""}><summary><b>${i + 1}. ${esc(s.title)}</b>
+        ${s.src.includes("ai") && /\[to complete/i.test(p.text[s.key] || "") ? '<span class="badge warn">to complete</span>' : ""}</summary>
+      ${s.src.includes("ai") ? `<textarea data-plan="${s.key}" style="min-height:220px" ${edit ? "" : "readonly"}>${esc(p.text[s.key] || "")}</textarea>` : ""}
+      ${s.src.includes("data") ? `<div class="note info small">📋 ${esc(r.summary[s.key] || "Filled in from the app.")} The PDF always uses the latest data.</div>` : ""}</details>`).join("")}
+    ${edit ? `<div class="card"><b>Issue for signature</b>
+      <p class="small muted">The PDF goes to three signers: the principal contractor, the competent person who checked it (SACPCMP-registered), and the client or client's agent.</p>
+      <div class="grid2"><div><label>Competent person who checked it</label><input id="pl-rev" value="${esc(r.consultants[0]?.name || "")}"></div>
+        <div><label>Registration no.</label><input id="pl-reg" value="${esc(r.consultants[0]?.reg || "")}" placeholder="SACPCMP no."></div></div>
+      <div class="grid2"><div><label>Signs for the principal contractor</label><input id="pl-pc" value="${esc(me().name)}"></div>
+        <div><label>Signs for the client</label><input id="pl-cl" value="${esc(r.client || "")}"></div></div>
+      <button class="dark" data-act="plan-issue">Issue version ${(p.version || 0) + 1} for signature</button></div>
+      <button class="link" data-act="plan-draft">Draft it again from scratch</button>` : ""}
+    ${actionBar(`<button class="primary" data-act="pdf" data-path="/api/hs-plan/pdf?site_id=${S.siteId}">📄 Preview the plan (PDF)</button>`)}`;
+}
+let planTimer = null;
+document.addEventListener("input", (e) => {
+  const k = e.target.dataset?.plan;
+  if (!k) return;
+  clearTimeout(planTimer);
+  planTimer = setTimeout(async () => {
+    const text = {};
+    document.querySelectorAll("[data-plan]").forEach((t) => { text[t.dataset.plan] = t.value; });
+    try { await api("/api/hs-plan", { method: "PUT", json: { site_id: S.siteId, text } }); toast("Saved.", "ok"); }
+    catch (err) { toast(friendly(err), "bad"); }
+  }, 1200);
+});
+ACT["plan-draft"] = async (btn) => {
+  if (btn.classList.contains("link") && !confirm("Draft the whole plan again? Your changes to the text are replaced.")) return;
+  render(`<div class="spinner"></div><p class="center">Writing the H&amp;S plan from the client's spec, the site and the risk assessment…<br><span class="muted small">About a minute. Keep this screen open.</span></p>`);
+  try { drawPlan(await api("/api/hs-plan/draft", { json: { site_id: S.siteId }, timeout: 240000 })); toast("Plan drafted. Check every section.", "ok"); }
+  catch (e) { toast(friendly(e), "bad"); VIEWS.hsplan(); }
+};
+ACT["plan-issue"] = (btn) => busy(btn, "Issuing…", async () => {
+  if (!$("#pl-rev").value.trim()) return toast("Name the competent person who checked the plan.", "bad");
+  await api("/api/hs-plan/issue", { json: { site_id: S.siteId, reviewer: $("#pl-rev").value, reviewer_reg: $("#pl-reg").value,
+    pc_signer: $("#pl-pc").value, client_signer: $("#pl-cl").value } });
+  toast("Issued. Send the PDF for signature.", "ok"); go("aes");
+});

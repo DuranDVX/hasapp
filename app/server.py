@@ -1225,6 +1225,9 @@ def upload_signed(aid: str, body: dict = Body(...), ctx: Ctx = Depends(current))
             a.signatures, a.note = [], _s(body.get("note"), 500) or "Wet-ink signatures; scan uploaded."
         a.signed_file, a.method, a.status, a.signed_at = name, method, "signed", db.utcnow()
         a.uploaded_by = ctx.user.name
+        if a.kind == "hs_plan":   # the approved plan goes into the safety file
+            s.add(db.Doc(company_id=ctx.cid, site_id=a.site_id, section="hs_plan", title=f"{a.title} (signed)"[:200],
+                         file=name, uploaded_by=ctx.user.name))
         return aes_d(a)
 
 
@@ -1551,6 +1554,200 @@ def spec_acceptance(body: dict = Body(default={}), ctx: Ctx = Depends(current)):
         a.original_file = files.put(ctx.cid, pdf.aes_document(ctx.company, site, a.title, pdf.text_body(text), signers, a.id),
                                     "application/pdf")
         s.add(a)
+        s.flush()
+        return aes_d(a)
+
+
+# ---------------------------------------------------------------- H&S plan (CR 7(1)(a))
+
+EVERY = {"shift": "Before each shift", "day": "Daily", "week": "Weekly", "month": "Monthly"}
+
+
+def _plan_data(s, ctx: Ctx, site: db.Site) -> dict:
+    """Everything the plan uses: the AI's context and the PDF's tables."""
+    st = site.settings or {}
+    spec, feats = st.get("spec") or {}, site.features or {}
+    on = lambda f: f is None or bool(feats.get(f))
+    risks = [risk_d(r) for r in s.scalars(site_risks_q(ctx.cid, site))]
+    n_workers = len(s.scalars(select(db.SiteWorker).where(db.SiteWorker.site_id == site.id)).all())
+    contractors = [{"name": c.name, "scope": c.scope} for c in s.scalars(
+        select(db.Contractor).where(db.Contractor.company_id == ctx.cid, db.Contractor.site_id == site.id,
+                                    db.Contractor.active))]
+    appointed: dict[str, list[str]] = {}
+    for r in s.scalars(select(db.Record).where(db.Record.company_id == ctx.cid, db.Record.site_id == site.id,
+                                               db.Record.kind == "appointment")):
+        appointed.setdefault(r.payload.get("type"), []).append((r.payload.get("appointee") or {}).get("name", ""))
+    keys = [k for k, f in library.REQUIRED_APPOINTMENTS if on(f)]
+    for a in spec.get("required_appointments") or []:
+        if a.get("key") in library.APPOINTMENTS and a["key"] not in keys:
+            keys.append(a["key"])
+    appointments = [{"title": library.APPOINTMENTS[k]["title"], "reg": library.APPOINTMENTS[k]["reg"],
+                     "who": ", ".join(x for x in appointed.get(k, []) if x)} for k in keys]
+    sfreq = spec.get("frequencies") or {}
+    override = {"scaffold": sfreq.get("scaffold_inspection_days"), "ladder": sfreq.get("ladder_inspection_days"),
+                "temporary_works": sfreq.get("temporary_works_inspection_days")}
+    inspections = []
+    for k, v in library.INSPECTION_SCHEDULE.items():
+        if on(v.get("feature")):
+            days = override.get(k)
+            inspections.append({"what": library.CHECKLISTS.get(k, {}).get("title", k.replace("_", " ").capitalize()),
+                                "how_often": f"Every {days} days (spec)" if days else EVERY.get(v["every"], v["every"]),
+                                "ref": v["reg"]})
+    if feats.get("mobile_plant"):
+        inspections.append({"what": "Construction vehicles and mobile plant: pre-use check by the operator",
+                            "how_often": "Daily, before use", "ref": "23"})
+    for x in spec.get("required_inspections") or []:
+        if x.get("checklist") == "other" and x.get("item"):
+            inspections.append({"what": x["item"], "how_often": f"Every {x['days']} days" if x.get("days") else "As the spec sets",
+                                "ref": f"spec {x.get('clause') or ''}".strip()})
+    return {
+        "today": today().isoformat(),
+        "principal_contractor": ctx.company.name,
+        "site": {"name": site.name, "address": site.address, "client": site.client, "client_agent": site.client_agent,
+                 "start_date": site.start_date.isoformat() if site.start_date else "",
+                 "end_date": site.end_date.isoformat() if site.end_date else "",
+                 "emergency_details": site.emergency, "work_types": [library.SITE_FEATURES[k] for k, v in feats.items()
+                                                                      if v and k in library.SITE_FEATURES],
+                 "facilities_on_site": st.get("facilities") or {}, "workers_on_register": n_workers,
+                 "consultants": [c for c in st.get("consultants") or [] if c.get("name")]},
+        "client_spec": {k: spec.get(k) for k in ("project", "client", "author", "date", "frequencies", "client_hazards",
+                                                 "key_rules", "permits", "ppe_minimum", "facilities", "ra_team_required")}
+                       if spec else None,
+        "risk_assessment": [{"activity": r["activity"], "hazards": [{"hazard": h.get("hazard"), "risk": h.get("risk"),
+                                                                     "controls": (h.get("controls") or [])[:5]}
+                                                                    for h in r["hazards"][:4]],
+                             "ppe": r["ppe"], "approved": r["approved"]} for r in risks[:45]],
+        "appointments": appointments,
+        "inspections": inspections,
+        "contractors": contractors,
+        "ppe_minimum": spec.get("ppe_minimum") or library.HS_PLAN_DEFAULT_PPE,
+        "registers": [x["title"] for x in library.FILE_SECTIONS],
+    }
+
+
+def _plan_inputs(data: dict) -> list[dict]:
+    st, sp = data["site"], data["client_spec"]
+    n_ok = len([r for r in data["risk_assessment"] if r["approved"]])
+    return [
+        {"label": "Site address, client and dates", "ok": bool(st["address"] and st["client"] and st["start_date"]),
+         "detail": "Fill in the address, the client and the start date.", "action": "setup"},
+        {"label": "Work on this site (excavations, scaffolds…)", "ok": bool(st["work_types"]),
+         "detail": "Tick the work types in site setup.", "action": "setup"},
+        {"label": "Client's H&S specification loaded", "ok": bool(sp),
+         "detail": "Load it under More → Client documents. The plan must be based on it.", "action": "consultant"},
+        {"label": "Risk assessment approved", "ok": n_ok > 0,
+         "detail": f"{n_ok} of {len(data['risk_assessment'])} activities approved by a competent person.", "action": "risks"},
+        {"label": "Emergency details (hospital, numbers)", "ok": bool(st["emergency_details"]),
+         "detail": "Add them in site setup.", "action": "setup"},
+    ]
+
+
+def _plan_summary(data: dict) -> dict:
+    a = data["appointments"]
+    return {"project": "Site, client, dates and consultants from site setup.",
+            "legal": f"{len(library.HS_PLAN_LAWS)} laws and the client's specification.",
+            "organisation": f"Appointment table: {len([x for x in a if x['who']])} of {len(a)} appointed in the app.",
+            "risk": f"Risk assessment table: {len(data['risk_assessment'])} activities.",
+            "inspections": f"Inspection schedule: {len(data['inspections'])} items.",
+            "ppe": f"Minimum PPE: {len(data['ppe_minimum'])} items.",
+            "emergency": "The site's emergency details from site setup.",
+            "records": f"Register list: {len(data['registers'])} file sections."}
+
+
+def _plan_state(s, ctx: Ctx, site: db.Site) -> dict:
+    plan = (site.settings or {}).get("hs_plan")
+    data = _plan_data(s, ctx, site)
+    out = {"sections": [{"key": k, "title": t, "src": src} for k, t, src in library.HS_PLAN_SECTIONS],
+           "inputs": _plan_inputs(data), "summary": _plan_summary(data), "plan": None,
+           "consultants": data["site"]["consultants"], "client": data["site"]["client_agent"] or data["site"]["client"]}
+    if plan:
+        a = s.get(db.AesDoc, plan.get("aes_id") or "")
+        out["plan"] = {k: plan.get(k) for k in ("text", "questions", "generated_at", "generated_by", "edited_at", "version")} \
+            | {"aes": aes_d(a) if a else None}
+    return out
+
+
+@app.get("/api/hs-plan")
+def hs_plan_get(site_id: str, ctx: Ctx = Depends(current)):
+    with db.session() as s:
+        return _plan_state(s, ctx, _get(s, db.Site, site_id, ctx, "Site"))
+
+
+@app.post("/api/hs-plan/draft")
+def hs_plan_draft(body: dict = Body(...), ctx: Ctx = Depends(current)):
+    ctx.need(*auth.MANAGE)
+    _limit(ctx)
+    with db.session() as s:
+        data = _plan_data(s, ctx, _get(s, db.Site, body.get("site_id", ""), ctx, "Site"))
+    draft = _ai(ai.hs_plan, data)
+    with db.session() as s:
+        site = _get(s, db.Site, body.get("site_id", ""), ctx, "Site")
+        old = (site.settings or {}).get("hs_plan") or {}
+        _settings(site, hs_plan={"text": draft["text"], "questions": draft["questions"], "version": old.get("version", 0),
+                                 "generated_at": db.utcnow().isoformat(timespec="minutes"), "generated_by": ctx.user.name,
+                                 "edited_at": "", "aes_id": old.get("aes_id", "")})
+        s.flush()
+        return _plan_state(s, ctx, site)
+
+
+@app.put("/api/hs-plan")
+def hs_plan_save(body: dict = Body(...), ctx: Ctx = Depends(current)):
+    ctx.need(*auth.MANAGE)
+    with db.session() as s:
+        site = _get(s, db.Site, body.get("site_id", ""), ctx, "Site")
+        plan = dict((site.settings or {}).get("hs_plan") or {})
+        if not plan:
+            raise HTTPException(400, "Draft the plan first.")
+        text = body.get("text") or {}
+        plan["text"] = {**(plan.get("text") or {}),
+                        **{k: _s(v, 20000) for k, v in text.items() if k in library.HS_PLAN_AI and isinstance(v, str)}}
+        if isinstance(body.get("questions"), list):
+            plan["questions"] = [_s(q, 300) for q in body["questions"] if _s(q)][:12]
+        plan["edited_at"], plan["edited_by"] = db.utcnow().isoformat(timespec="minutes"), ctx.user.name
+        _settings(site, hs_plan=plan)
+        return {"ok": True, "edited_at": plan["edited_at"]}
+
+
+def _plan_pdf(s, ctx: Ctx, site: db.Site, signers: list, ref: str, draft: bool, version: int) -> bytes:
+    plan = (site.settings or {}).get("hs_plan")
+    if not plan:
+        raise HTTPException(400, "Draft the plan first.")
+    return pdf.hs_plan(ctx.company, site, plan.get("text") or {}, _plan_data(s, ctx, site), signers, ref, draft, version)
+
+
+@app.get("/api/hs-plan/pdf")
+def hs_plan_pdf(site_id: str, ctx: Ctx = Depends(current)):
+    with db.session() as s:
+        site = _get(s, db.Site, site_id, ctx, "Site")
+        plan = (site.settings or {}).get("hs_plan") or {}
+        data = _plan_pdf(s, ctx, site, library.HS_PLAN_SIGNERS, "draft", True, (plan.get("version") or 0) + 1)
+    return Response(data, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="hs-plan-draft-{site_id}.pdf"'})
+
+
+@app.post("/api/hs-plan/issue")
+def hs_plan_issue(body: dict = Body(...), ctx: Ctx = Depends(current)):
+    """Freeze the plan as a PDF for the competent person, the principal contractor and the client to sign."""
+    ctx.need(*auth.MANAGE)
+    with db.session() as s:
+        site = _get(s, db.Site, body.get("site_id", ""), ctx, "Site")
+        plan = dict((site.settings or {}).get("hs_plan") or {})
+        if not plan:
+            raise HTTPException(400, "Draft the plan first.")
+        reviewer = _s(body.get("reviewer"))
+        if not reviewer:
+            raise HTTPException(400, "Name the competent person who reviewed the plan.")
+        reg = _s(body.get("reviewer_reg"), 80)
+        signers = [f"{_s(body.get('pc_signer')) or 'Name:'} for {ctx.company.name} (principal contractor)",
+                   f"{reviewer}{', ' + reg if reg else ''}: competent person who reviewed this plan",
+                   f"{_s(body.get('client_signer')) or 'Name:'} for {site.client or 'the client'}: approval (CR 5(1)(l))"]
+        version = (plan.get("version") or 0) + 1
+        a = db.AesDoc(id=db.new_id(), company_id=ctx.cid, site_id=site.id, kind="hs_plan",
+                      title=f"Site health and safety plan v{version}: {site.name}", signers=signers)
+        a.original_file = files.put(ctx.cid, _plan_pdf(s, ctx, site, signers, a.id, False, version), "application/pdf")
+        s.add(a)
+        plan.update(version=version, aes_id=a.id, issued_at=db.utcnow().isoformat(timespec="minutes"))
+        _settings(site, hs_plan=plan)
         s.flush()
         return aes_d(a)
 

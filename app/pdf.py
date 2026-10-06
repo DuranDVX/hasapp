@@ -924,3 +924,124 @@ def incident_pack(company, site, inc, inv, close, consultants, id_files: list, i
     res = io.BytesIO()
     out.write(res)
     return res.getvalue()
+
+
+# ---------------------------------------------------------------- H&S plan (CR 7(1)(a))
+
+def _plan_text(text: str) -> list:
+    """The plan's light markup: '## ' sub-heading, '- ' bullet, other lines paragraphs.
+    '[to complete: ...]' gaps print in amber so the reviewer sees them."""
+    import re
+    mark = lambda t: re.sub(r"\[to complete[^\]]*\]", lambda m: f'<font color="#b45d00">{m.group(0)}</font>', escape(t))
+    bullet = ParagraphStyle("pb", parent=P, leftIndent=10, firstLineIndent=-7)
+    out = []
+    for line in str(text or "").splitlines():
+        t = line.strip()
+        if not t:
+            continue
+        if t.startswith("## "):
+            out.append(_raw(mark(t[3:]), H3))
+        elif t.startswith(("- ", "• ", "* ")):
+            out.append(_raw("• " + mark(t[2:].strip()), bullet))
+        else:
+            out.append(_raw(mark(t)))
+    return out
+
+
+def _table(header: list, rows: list, widths: list) -> Table:
+    t = Table([[_p(h, SMALL) for h in header]] + [[_p(c) for c in r] for r in rows], colWidths=widths, repeatRows=1)
+    t.setStyle(GRID)
+    return t
+
+
+def _plan_data_flow(key: str, data: dict, company) -> list:
+    st, sp = data["site"], data.get("client_spec") or {}
+    if key == "project":
+        cons = "; ".join(f"{c['name']} ({c.get('firm') or ''}{', ' + c['reg'] if c.get('reg') else ''})" for c in st["consultants"])
+        return [_kv([("Project / site", st["name"]), ("Address", st["address"]), ("Client", st["client"]),
+                     ("Client's agent", st["client_agent"]), ("Principal contractor", company.name),
+                     ("Contract period", f"{st['start_date'] or '[to complete]'} to {st['end_date'] or '[to complete]'}"),
+                     ("Client H&S specification", " · ".join(x for x in (sp.get("project"), sp.get("author"), sp.get("date")) if x)
+                      or "[to complete: load the client's specification]"),
+                     ("H&S consultant", cons), ("Work on this site", ", ".join(st["work_types"])),
+                     ("Contractors", ", ".join(c["name"] for c in data["contractors"])),
+                     ("Workers on the register", str(st["workers_on_register"]))])]
+    if key == "legal":
+        laws = library.HS_PLAN_LAWS + [f"The client's health and safety specification ({sp.get('author') or 'author'}, "
+                                       f"{sp.get('date') or 'date'})" if sp else "The client's health and safety specification"]
+        if any("Scaffold" in w for w in st["work_types"]):
+            laws.append("SANS 10085-1: the design, erection, use and inspection of access scaffolding")
+        return [_p("This plan complies with, and must be read with:")] + _bullets(laws)
+    if key == "organisation":
+        return [_p("Appointments", H3), _table(["Appointment", "Regulation", "Appointed person"],
+                                              [[a["title"], a["reg"], a["who"] or "To be appointed in writing"] for a in data["appointments"]],
+                                              [80 * mm, 30 * mm, W - 110 * mm])]
+    if key == "risk":
+        rows = []
+        for r in data["risk_assessment"]:
+            hz = r["hazards"]
+            rows.append([r["activity"], "; ".join(h["hazard"] or "" for h in hz),
+                         "/".join(sorted({h.get("risk") or "" for h in hz})),
+                         "; ".join(c for h in hz for c in (h["controls"] or [])[:2])])
+        return [_p("Risk assessment summary (the full assessment is in the H&S file)", H3),
+                _table(["Activity", "Main hazards", "Risk", "Key controls"], rows or [["[to complete]", "", "", ""]],
+                       [38 * mm, 52 * mm, 12 * mm, W - 102 * mm])]
+    if key == "inspections":
+        return [_p("Inspection schedule", H3), _table(["What", "How often", "Regulation"],
+                                                      [[i["what"], i["how_often"], i["ref"]] for i in data["inspections"]],
+                                                      [90 * mm, 50 * mm, W - 140 * mm])]
+    if key == "ppe":
+        return [_p("Minimum PPE on site", H3)] + _bullets(data["ppe_minimum"])
+    if key == "emergency":
+        return [_p("Emergency details", H3), _p(st["emergency_details"] or "[to complete: hospital, ambulance, fire, police "
+                                                                              "and site emergency numbers]")]
+    if key == "records":
+        return [_p("Sections of the H&S file", H3)] + _bullets(data["registers"])
+    return []
+
+
+def hs_plan(company, site, text: dict, data: dict, signers: list, ref: str, draft: bool, version: int) -> bytes:
+    buf = io.BytesIO()
+    title = "Site health and safety plan"
+    doc, frame = _doc(buf, title, company, site)
+
+    def page(c, d):
+        frame(c, d)
+        if draft:
+            c.saveState()
+            c.setFont("Helvetica-Bold", 70)
+            c.setFillColor(colors.Color(0.85, 0.42, 0.11, alpha=0.12))
+            c.translate(A4[0] / 2, A4[1] / 2)
+            c.rotate(45)
+            c.drawCentredString(0, 0, "DRAFT")
+            c.restoreState()
+
+    st, sp = data["site"], data.get("client_spec") or {}
+    flow = _letterhead(company, st["consultants"]) + [
+        Spacer(1, 30 * mm), _p("SITE-SPECIFIC HEALTH AND SAFETY PLAN", ParagraphStyle("cv", parent=H1, fontSize=22, leading=26)),
+        _p(st["name"], ParagraphStyle("cv2", parent=H2, fontSize=15)), Spacer(1, 8 * mm),
+        _kv([("Principal contractor", company.name), ("Client", st["client"]), ("Site address", st["address"]),
+             ("Version", f"{version} · {data['today']}"), ("Status", "DRAFT for review" if draft else "Issued for signature"),
+             ("Document", ref)]),
+        Spacer(1, 8 * mm),
+        _p("Prepared in terms of Construction Regulation 7(1)(a) of the Construction Regulations, 2014, and based on the "
+           f"client's health and safety specification{' by ' + sp['author'] if sp.get('author') else ''}"
+           f"{' dated ' + sp['date'] if sp.get('date') else ''}. A competent person reviews this plan before it is issued, "
+           "and the client approves it before work starts (CR 5(1)(l))."),
+        _p(f"Drafted with {config.APP_NAME} from the client's specification, the site details and the risk assessment. "
+           "Text marked [to complete] still needs the contractor's input.", SMALL),
+        PageBreak(), _p("Contents", H1)]
+    flow += [_p(f"{i}. {t}") for i, (k, t, _) in enumerate(library.HS_PLAN_SECTIONS, 1)]
+    flow.append(PageBreak())
+    for i, (k, t, src) in enumerate(library.HS_PLAN_SECTIONS, 1):
+        flow.append(_p(f"{i}. {t}", H2))
+        if "ai" in src:
+            flow += _plan_text(text.get(k)) or [_p("[to complete]", WARN)]
+        if "data" in src:
+            flow += _plan_data_flow(k, data, company)
+    flow += [PageBreak(), _p("Approval", H1),
+             _p("By signing, the principal contractor commits to carry out this plan; the competent person confirms the "
+                "review; and the client approves the plan for use on this site (CR 5(1)(l), 7(1)(a)).")]
+    flow += _signing_block(signers)
+    doc.build(flow, onFirstPage=page, onLaterPages=page)
+    return buf.getvalue()

@@ -20,7 +20,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from PIL import Image  # noqa: E402
 from pypdf import PdfReader  # noqa: E402
 
-from app import ai, db, server  # noqa: E402
+from app import ai, db, library, server  # noqa: E402
 
 client = TestClient(server.app)
 client.__enter__()   # run startup (creates tables)
@@ -349,3 +349,43 @@ def test_forgot_and_reset_password():
     assert client.post("/api/password/reset", json={"token": "tok-123", "password": "again-pass-3"}).status_code == 400
     assert client.post("/api/login", json={"email": email, "password": "first-pass-1"}).status_code == 401
     assert client.post("/api/login", json={"email": email, "password": "new-pass-22"}).status_code == 200
+
+
+def test_hs_plan_draft_edit_issue_sign(co, monkeypatch):
+    h, sid = co["h"], co["site"]["id"]
+    client.put(f"/api/sites/{sid}", json={"features": {"excavations": True, "mobile_plant": True},
+                                          "consultants": [{"name": "C. Consultant", "reg": "CHSA/1"}]}, headers=h)
+    seen = {}
+
+    def fake(data):
+        seen.update(data)
+        return {"text": {k: f"## {k}\n- Control for {k}\nHospital: [to complete: name] and [to complete: number]."
+                         for k in library.HS_PLAN_AI}, "questions": ["Which hospital is nearest?"]}
+    monkeypatch.setattr(ai, "hs_plan", fake)
+    r = client.get(f"/api/hs-plan?site_id={sid}", headers=h).json()
+    assert r["plan"] is None and any(not i["ok"] for i in r["inputs"])
+    r = client.post("/api/hs-plan/draft", json={"site_id": sid}, headers=h).json()
+    assert r["plan"]["questions"] == ["Which hospital is nearest?"]
+    assert "Excavations or trenches" in seen["site"]["work_types"]
+    assert any(i["ref"] == "23" for i in seen["inspections"])          # mobile plant pre-use check
+    assert any(a["reg"] == "13(1)" for a in seen["appointments"])      # excavation supervisor required
+    board = client.get(f"/api/board?site_id={sid}", headers=h).json()
+    tile = next(t for t in board["tiles"] if t["key"] == "hs_plan")
+    assert tile["status"] == "amber" and tile["action"] == "hsplan"
+    assert client.put("/api/hs-plan", json={"site_id": sid, "text": {"intro": "Our own intro.", "bogus": "x"}},
+                      headers=h).status_code == 200
+    r = client.get(f"/api/hs-plan?site_id={sid}", headers=h).json()
+    assert r["plan"]["text"]["intro"] == "Our own intro." and "bogus" not in r["plan"]["text"]
+    pdf_ = client.get(f"/api/hs-plan/pdf?site_id={sid}", headers=h)
+    assert pdf_.status_code == 200
+    text = "".join(pg.extract_text() for pg in PdfReader(io.BytesIO(pdf_.content)).pages)
+    assert "SITE-SPECIFIC HEALTH AND SAFETY PLAN" in text and "Our own intro." in text and "Excavation supervisor" in text
+    assert client.post("/api/hs-plan/issue", json={"site_id": sid}, headers=h).status_code == 400   # needs reviewer
+    a = client.post("/api/hs-plan/issue", json={"site_id": sid, "reviewer": "C. Consultant", "reviewer_reg": "CHSA/1"},
+                    headers=h).json()
+    assert a["kind"] == "hs_plan" and "v1" in a["title"] and any("C. Consultant" in x for x in a["signers"])
+    r = client.post(f"/api/aes/{a['id']}/signed", json={"method": "wet_ink", "file": "data:application/pdf;base64,"
+                                                         + base64.b64encode(pdf_.content).decode()}, headers=h)
+    assert r.status_code == 200, r.text
+    board = client.get(f"/api/board?site_id={sid}", headers=h).json()
+    assert next(t for t in board["tiles"] if t["key"] == "hs_plan")["status"] == "green"

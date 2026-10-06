@@ -232,17 +232,23 @@ def board(s, company: db.Company, site: db.Site, today: date, now_hour: int = 12
     docs = s.scalars(select(db.Doc).where(db.Doc.company_id == cid,
                                           (db.Doc.site_id.is_(None)) | (db.Doc.site_id == sid))).all()
     have_docs = {d.section for d in docs}
-    def doc_tile(key, section, title, reg, feature=None):
+    def doc_tile(key, section, title, reg, feature=None, action="file"):
         if not on(feature):
             return
         hit = [d for d in docs if d.section == section]
         exp = [d for d in hit if _exp(d.expires, today) == "expired"]
         soon = [d for d in hit if _exp(d.expires, today) == "expiring"]
         st = "red" if not hit or exp else "amber" if soon else "green"
-        detail = "Not uploaded." if not hit else f"Expired: {exp[0].title}." if exp else \
+        detail = ("Not on file. The app can draft it." if key == "hs_plan" else "Not uploaded.") if not hit else f"Expired: {exp[0].title}." if exp else \
             f"Expires {soon[0].expires}." if soon else "On file."
-        tiles.append(_tile("Appointments and documents", key, title, reg, st, detail, "file"))
-    doc_tile("hs_plan", "hs_plan", "H&S plan (approved)", "7(1)(a)")
+        tiles.append(_tile("Appointments and documents", key, title, reg, st, detail, action))
+    plan = (site.settings or {}).get("hs_plan") or {}
+    if plan and not any(d.section == "hs_plan" for d in docs):
+        tiles.append(_tile("Appointments and documents", "hs_plan", "H&S plan (approved)", "7(1)(a)", "amber",
+                           "Issued for signature. Upload the signed copy." if plan.get("aes_id")
+                           else "Drafted in the app. Check it and issue it for signature.", "hsplan"))
+    else:
+        doc_tile("hs_plan", "hs_plan", "H&S plan (approved)", "7(1)(a)", action="hsplan")
     doc_tile("client_spec", "client_spec", "Client H&S specification", "5(1)(b)")
     doc_tile("notification", "notification", "Notification / work permit", "3, 4")
     doc_tile("coid", "company", "COID letter of good standing", "5(1)(j)")

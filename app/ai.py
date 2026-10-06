@@ -290,3 +290,97 @@ def hazard_coverage(client_hazards: list[str], items: list[dict]) -> dict:
             "hazards": [h["hazard"] + ": " + "; ".join(h.get("controls", [])) for h in i["hazards"]]} for i in items]
     return llm.call(COVER_SYSTEM, f"Client hazards:\n{json.dumps(client_hazards)}\n\nRisk assessment items:\n"
                     f"{json.dumps(ctx, ensure_ascii=False)}", schema=schema)
+
+
+# ---------------------------------------------------------------- H&S plan
+
+PLAN_SYSTEM = """You draft parts of a principal contractor's site-specific health and safety plan for a construction site
+in South Africa (Construction Regulations 2014, regulation 7(1)(a)). The plan must be based on the client's health and
+safety specification and must fit this site: its work types, its risk assessment, and the client's rules and frequencies.
+
+Rules:
+- Write plain, direct English. Use short sentences and the active voice. Say who must do what and how often, for example
+  "The excavation supervisor inspects every excavation before each shift."
+- Use the facts in the SITE DATA. Where the client's specification sets a rule or a frequency, follow it and cite its
+  clause as "(spec 2.9.3)".
+- Never invent facts. Do not write names, phone numbers, addresses, hospital names, distances, dates or quantities that
+  are not in the SITE DATA. Write "[to complete: what is missing]" in the text instead, and add a question.
+- Cite only these legal references, and only where they apply: {refs} Do not cite any other regulation or section.
+- Format: a line that starts with "## " is a sub-heading; a line that starts with "- " is a bullet point; any other line
+  is a paragraph. Use no other markup: no bold, no tables, no numbered lists.
+- Keep each section to what a site manager needs: about 80 to 300 words. The hazards section may be longer: one
+  sub-heading per hazard group that applies to this site, with bullet-point controls.
+- The app adds these tables itself, so do not repeat their contents: project details, the list of laws, the appointment
+  table, the risk assessment table, the inspection schedule, the minimum PPE list and the register list. Refer to them
+  as "the table below" where it helps.
+- questions: short questions about facts the plan still needs from the contractor (at most 5 for your sections).""".format(
+    refs=library.HS_PLAN_REFS)
+
+PLAN_BRIEF = {
+    "intro": "Purpose of the plan; the scope of the works on this site; who the plan applies to (employees, contractors, "
+             "visitors); that it is based on the client's specification and the risk assessment; that it is kept on site.",
+    "policy": "A short health and safety policy statement for the chief executive officer to sign (OHS Act s7, s8): "
+              "commitments, consultation, legal compliance, and that every person must stop unsafe work.",
+    "organisation": "Responsibilities of the chief executive officer (s16), construction manager (CR 8(1)), construction "
+                    "supervisors (CR 8(7)), safety officer (CR 8(5)), competent persons, H&S representatives, employees "
+                    "(s14) and contractors. Refer to the appointment table below.",
+    "risk": "How risk is managed (CR 9): the client's baseline risk assessment, the contractor's risk assessment by a "
+            "competent person, review when work or conditions change, daily task briefings before work. Then a "
+            "'## Method statements' list of the safe work procedures this site needs for its high-risk work. "
+            "Refer to the risk assessment table below.",
+    "training": "Induction of every worker and visitor before they enter the site; medical certificates of fitness "
+                "(Annexure 3, CR 7(8)); task training and certificates (operators, scaffold erectors, fall protection, "
+                "first aid); toolbox talks and daily task briefings with their frequency.",
+    "communication": "H&S representatives (s17) and the H&S committee (s19) with how often it meets (spec frequency, or at "
+                     "least every three months); site meetings; notice board; toolbox talks; how contractors take part.",
+    "inspections": "Who inspects what and how often (refer to the inspection schedule below); site inspections by the "
+                   "safety officer; audits of contractors by the principal contractor (spec frequency, or every 30 days); "
+                   "client audits; how findings are closed out.",
+    "hazards": "One '## ' sub-heading per hazard group that applies to this site, from the work types, the risk assessment "
+               "and the client's listed hazards (for example '## Excavations (CR 13)'). Under each, bullet-point controls "
+               "that are specific and checkable. Include general hazards every site has: manual handling, hand and power "
+               "tools, electricity, fire, weather and heat.",
+    "permits": "Which permits to work apply on this site (from the specification and the work types), who issues and "
+               "closes them, and that work stops when conditions change.",
+    "ppe": "How PPE is chosen, issued, replaced and recorded (General Safety Regulations 2); task-specific PPE from the risk "
+           "assessment; no PPE, no work. Refer to the minimum PPE list below.",
+    "contractors": "Appointment of contractors in writing (CR 7(1)(c)); the s37(2) agreement; each contractor's H&S plan and "
+                   "file approved before work starts; induction; audits; stopping unsafe contractor work.",
+    "incidents": "Report every incident and near miss at once; first aid; investigation within 7 days with Annexure 1 "
+                 "(General Administrative Regulations 9); reporting of serious incidents to the Department of Employment "
+                 "and Labour (s24); the Compensation Fund report (COIDA); the incident register; lessons shared in toolbox talks.",
+    "emergency": "The emergency plan: how to raise the alarm, emergency contacts (from the site data only), first aiders and "
+                 "first aid boxes, fire equipment (CR 29), evacuation and the assembly point, rescue from excavations and "
+                 "heights, and drills (spec frequency).",
+    "health": "Medical certificates of fitness; facilities (CR 30, Facilities Regulations) with the specification's ratios; "
+              "drinking water, eating area, changing area; noise, dust, heat and sun; alcohol and drug rules; fatigue.",
+    "site": "Housekeeping (CR 27); stacking and storage (CR 28); site fencing and access control; public and visitor safety "
+            "(s9); signs; traffic and pedestrian routes; waste, spills and dust.",
+    "records": "Records are kept in the SiteBakkie app as electronic records (ECT Act s12-s17), signed electronically, "
+               "protected against change, and printed when a person asks for paper. The H&S file is available on site "
+               "(CR 7(1)(b)). Refer to the register list below.",
+    "review": "When the plan is reviewed (change of scope, new hazards, after a serious incident, a change to the client's "
+              "specification); version control; client approval before work starts and after changes (CR 5(1)(l)).",
+}
+PLAN_GROUPS = [["intro", "policy", "organisation", "risk", "training", "communication"],
+               ["hazards", "permits", "ppe", "inspections"],
+               ["contractors", "incidents", "emergency", "health", "site", "records", "review"]]
+
+
+def _plan_part(keys: list[str], data: dict) -> dict:
+    schema = _obj({**{k: {"type": "string"} for k in keys}, "questions": {"type": "array", "items": {"type": "string"}}})
+    brief = "\n".join(f"- {k} ({library.HS_PLAN_TITLES[k]}): {PLAN_BRIEF[k]}" for k in keys)
+    return llm.call(PLAN_SYSTEM, f"Write these sections:\n{brief}\n\nSITE DATA:\n{json.dumps(data, ensure_ascii=False)}",
+                    schema=schema, max_tokens=12000)
+
+
+def hs_plan(data: dict) -> dict:
+    """Draft the plan text in three parallel calls; returns {"text": {key: str}, "questions": [...]}."""
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(len(PLAN_GROUPS)) as ex:
+        parts = list(ex.map(lambda g: _plan_part(g, data), PLAN_GROUPS))
+    text, questions = {}, []
+    for part in parts:
+        questions += [q for q in part.pop("questions", []) if q and q not in questions]
+        text.update({k: v for k, v in part.items() if k in library.HS_PLAN_TITLES})
+    return {"text": text, "questions": questions[:12]}

@@ -596,3 +596,69 @@ FORMS["incident_close"] = {
         {"k": "safe", "label": "A competent person confirmed the area and work are safe", "type": "yesno", "req": True},
         {"k": "notes", "label": "What was done", "type": "textarea", "req": True}],
     "signers": [{"role": "competent person", "who": "me", "label": "Competent person"}]}
+
+
+# ---------------------------------------------------------------- H&S plan
+# The principal contractor's site-specific plan (CR 7(1)(a)). The app drafts the
+# "ai" text from the client's specification, the site and the risk assessment; a
+# competent person checks it. "data" parts are built from the app's records each
+# time the PDF is made, so they stay current.
+HS_PLAN_SECTIONS = [
+    ("intro", "Introduction and scope", "ai"),
+    ("project", "Project information", "data"),
+    ("legal", "Legal requirements", "data"),
+    ("policy", "Health and safety policy", "ai"),
+    ("organisation", "Organisation, appointments and responsibilities", "ai+data"),
+    ("risk", "Risk assessment and method statements", "ai+data"),
+    ("training", "Induction, training and competence", "ai"),
+    ("communication", "Communication and consultation", "ai"),
+    ("inspections", "Inspections, monitoring and audits", "ai+data"),
+    ("hazards", "Site hazards and controls", "ai"),
+    ("permits", "Permits to work", "ai"),
+    ("ppe", "Personal protective equipment", "ai+data"),
+    ("contractors", "Contractor management", "ai"),
+    ("incidents", "Incident reporting and investigation", "ai"),
+    ("emergency", "Emergency preparedness", "ai+data"),
+    ("health", "Occupational health and welfare facilities", "ai"),
+    ("site", "Housekeeping, public safety and environment", "ai"),
+    ("records", "Records and registers", "ai+data"),
+    ("review", "Review of this plan", "ai"),
+]
+HS_PLAN_TITLES = {k: t for k, t, _ in HS_PLAN_SECTIONS}
+HS_PLAN_AI = [k for k, _, src in HS_PLAN_SECTIONS if "ai" in src]
+
+HS_PLAN_LAWS = [
+    "Occupational Health and Safety Act 85 of 1993 (OHS Act)",
+    "Construction Regulations, 2014",
+    "General Administrative Regulations, 2003",
+    "General Safety Regulations, 1986",
+    "Facilities Regulations, 2004",
+    "Environmental Regulations for Workplaces, 1987",
+    "Driven Machinery Regulations, 2015",
+    "Electrical Installation Regulations, 2009, and Electrical Machinery Regulations, 2011",
+    "Regulations for Hazardous Chemical Agents, 2021",
+    "Noise-Induced Hearing Loss Regulations, 2003",
+    "Ergonomics Regulations, 2019",
+    "Compensation for Occupational Injuries and Diseases Act 130 of 1993 (COIDA)",
+    "Electronic Communications and Transactions Act 25 of 2002 (electronic records and signatures)",
+    "Protection of Personal Information Act 4 of 2013 (POPIA)",
+]
+
+# The only references the AI may cite. Anything else is left out.
+HS_PLAN_REFS = (
+    "OHS Act s7, s8, s9, s13, s14, s16, s17, s19, s24, s37(2); "
+    "Construction Regulations (CR) 3, 4, 5(1)(l), 7(1)(a), 7(1)(b), 7(1)(c), 7(8), 8(1), 8(5), 8(7), 9, 10, 11, 12, 13, "
+    "14, 16, 17, 18, 19, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30; General Administrative Regulations 9 and Annexure 1; "
+    "General Safety Regulations 2 (PPE) and 3 (first aid); Environmental Regulations for Workplaces 9 (fire); "
+    "Facilities Regulations; Regulations for Hazardous Chemical Agents; Noise-Induced Hearing Loss Regulations; "
+    "Ergonomics Regulations; Driven Machinery Regulations 18 (lifting machinery); Electrical Installation Regulations; "
+    "COIDA; ECT Act s12-s17; Annexure 3 (medical certificate of fitness); SANS 10085-1 (scaffolding).")
+
+HS_PLAN_DEFAULT_PPE = ["Hard hat", "Safety boots", "Reflective vest", "Overalls or long-sleeved work clothes",
+                       "Safety glasses where there is a risk to the eyes", "Gloves suited to the task"]
+
+HS_PLAN_SIGNERS = ["Principal contractor: chief executive officer or s16(2) appointee",
+                   "Competent person who reviewed this plan",
+                   "Client or client's agent: approval (CR 5(1)(l))"]
+
+AES_DOCS["hs_plan"] = "Site health and safety plan (CR 7(1)(a))"
