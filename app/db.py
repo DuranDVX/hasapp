@@ -77,6 +77,17 @@ class Session(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime)
 
 
+class PasswordReset(Base):
+    """A forgot-password request. The link holds the token; the table holds only its hash."""
+    __tablename__ = "password_resets"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    emailed: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
 class Site(Base):
     __tablename__ = "sites"
     id: Mapped[str] = mapped_column(String(16), primary_key=True, default=new_id)

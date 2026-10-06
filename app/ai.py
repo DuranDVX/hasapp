@@ -91,34 +91,83 @@ def toolbox_talk(topic: str, hazards: list[dict], language: str) -> dict:
 
 # ---------------------------------------------------------------- incident
 
-INCIDENT_SYSTEM = """You turn a spoken account of a site incident into a structured incident report for a South African construction site.
+INCIDENT_SYSTEM = """You turn a spoken or typed account of a site incident into an incident flash report for a South African construction site. A health and safety consultant must be able to submit it.
 
 Rules:
-- Record only facts the speaker gives. Do not guess names, times, injuries or causes. Put gaps in "questions".
-- Match injured persons to the worker list by id when you can; else leave worker_id empty.
-- "possible_causes": list causes the speaker states or that follow directly from the facts. Label them as possible.
-- "possibly_reportable": true when the account describes a death; unconsciousness; loss of a limb or part of a limb; an injury or illness likely to cause death, a permanent defect, or at least 14 days off work; a major incident; a spill of a dangerous substance; an uncontrolled release of a substance under pressure; or machinery that broke or ran out of control and caused flying, falling or uncontrolled moving objects. These events may have to be reported to the Department of Employment and Labour under section 24 of the OHS Act. The safety officer decides.
-- Write in plain English."""
+- Record only facts the speaker gives. Do not guess names, times, ID numbers, injuries, diagnoses or causes. Put every gap in "questions".
+- "title": a short type of incident, for example "Trench collapse: worker trapped by falling soil".
+- "type": the category. near_miss, first_aid, medical (treated by a doctor or clinic), disabling (cannot do normal work the next day), lost_time, fatal, property, environmental, other. When unsure between two, pick the lower one and ask a question.
+- "description": a clear, factual narrative in the third person and past tense, in short paragraphs: what work was being done, by how many people, where, what happened, how the person was freed or helped, where they were taken, and the outcome. Use the speaker's facts only.
+- "immediate_actions": one action per line, starting with what was done first (stop work, secure area, call ambulance, first aid, isolate, report, investigation started).
+- People: match each injured person to the worker list by id when the name is close (speech recognition misspells names). Fill body_parts, effects and disablement (Annexure 1 boxes) only from the facts; "Other" in effects needs effect_other (for example "Trapped in soil, no injury").
+- Medical findings: clinic or hospital description, pre-existing defect, physiotherapy, unfit for work, date fit for light duty, date of resumption. Leave empty when not said.
+- "work_type": the machine, process or type of work (Annexure 1 item 9).
+- "possibly_reportable": true when the account describes a death; unconsciousness; loss of a limb or part of a limb; an injury or illness likely to cause death, a permanent defect, or at least 14 days off work; a major incident; a spill of a dangerous substance; an uncontrolled release of a substance under pressure; or machinery that broke or ran out of control and caused flying, falling or uncontrolled moving objects (OHS Act section 24). The safety officer decides.
+- Write in plain English. Dates as YYYY-MM-DD where the speaker gives a date."""
 
 
-def incident(transcript: str, workers: list[dict]) -> dict:
+def incident(transcript: str, workers: list[dict], today: str = "") -> dict:
+    person = _obj({
+        "name": {"type": "string"}, "worker_id": {"type": "string"}, "occupation": {"type": "string"},
+        "injury": {"type": "string"}, "treatment": {"type": "string"},
+        "body_parts": {"type": "array", "items": {"type": "string", "enum": library.BODY_PARTS}},
+        "effects": {"type": "array", "items": {"type": "string", "enum": library.EFFECTS}},
+        "effect_other": {"type": "string"},
+        "disablement": {"type": "string", "enum": library.DISABLEMENT + [""]},
+        "medical": _obj({"clinic": {"type": "string"}, "pre_existing": {"type": "string"},
+                         "physio": {"type": ["boolean", "null"]}, "unfit": {"type": ["boolean", "null"]},
+                         "light_duty_date": {"type": "string"}, "resumption_date": {"type": "string"}})})
     schema = _obj({
-        "type": {"type": "string", "enum": list(library.INCIDENT_TYPES)},
+        "type": {"type": "string", "enum": list(library.INCIDENT_TYPES)}, "title": {"type": "string"},
         "occurred_at": {"type": "string"}, "location": {"type": "string"},
-        "description": {"type": "string"},
-        "people": {"type": "array", "items": _obj({
-            "name": {"type": "string"}, "worker_id": {"type": "string"},
-            "injury": {"type": "string"}, "treatment": {"type": "string"}})},
+        "reported_by": {"type": "string"}, "reporter_contact": {"type": "string"},
+        "work_type": {"type": "string"}, "description": {"type": "string"},
+        "people": {"type": "array", "items": person},
+        "damage": {"type": "array", "items": {"type": "string", "enum": library.DAMAGE}},
+        "damage_note": {"type": "string"},
         "witnesses": {"type": "array", "items": {"type": "string"}},
         "immediate_actions": {"type": "string"},
         "possible_causes": {"type": "array", "items": {"type": "string"}},
-        "possibly_reportable": {"type": "boolean"},
-        "reportable_reason": {"type": "string"},
+        "possibly_reportable": {"type": "boolean"}, "reportable_reason": {"type": "string"},
         "questions": {"type": "array", "items": {"type": "string"}},
     })
     ctx = [{"id": w["id"], "name": w["name"], "trade": w.get("trade", "")} for w in workers]
-    content = f"Workers on site:\n{json.dumps(ctx, ensure_ascii=False)}\n\nAccount:\n{transcript}"
+    content = (f"Today is {today}.\nWorkers on site:\n{json.dumps(ctx, ensure_ascii=False)}\n\nAccount:\n{transcript}")
     return llm.call(INCIDENT_SYSTEM, content, schema=schema)
+
+
+INVESTIGATION_SYSTEM = """You turn an investigator's spoken or typed findings into an incident investigation for a South African construction site, in the format of the consultant's "Incident/Accident Report and Investigation" form and Annexure 1 part B to D.
+
+Rules:
+- Use the incident report given and the investigator's words. Do not invent facts.
+- Tick the cause checklists (agencies, unsafe acts, unsafe conditions, personal factors, job factors) only where the facts support it. The same for control steps.
+- "short_description": one or two sentences for Annexure 1 B4. "suspected_cause": Annexure 1 B5.
+- "actions": corrective actions, each with who is responsible and a due date (YYYY-MM-DD) when said.
+- "employer_action": Annexure 1 C, what the employer did to prevent a recurrence.
+- "close_out": the conditions before work may restart.
+- Plain English. Gaps go in "questions"."""
+
+
+def investigation(transcript: str, incident: dict) -> dict:
+    lst = lambda e: {"type": "array", "items": {"type": "string", "enum": e}}
+    schema = _obj({
+        "investigator": {"type": "string"}, "designation": {"type": "string"},
+        "short_description": {"type": "string"}, "suspected_cause": {"type": "string"},
+        "findings": {"type": "string"}, "root_causes": {"type": "array", "items": {"type": "string"}},
+        "agencies_general": lst(library.AGENCIES_GENERAL), "agencies_hygiene": lst(library.AGENCIES_HYGIENE),
+        "normal_work": {"type": ["boolean", "null"]},
+        "unsafe_acts": lst(library.UNSAFE_ACTS), "unsafe_conditions": lst(library.UNSAFE_CONDITIONS),
+        "personal_factors": lst(library.PERSONAL_FACTORS), "job_factors": lst(library.JOB_FACTORS),
+        "control_personal": lst(library.CONTROL_PERSONAL), "control_job": lst(library.CONTROL_JOB),
+        "actions": {"type": "array", "items": _obj({"action": {"type": "string"}, "owner": {"type": "string"},
+                                                    "due": {"type": "string"}})},
+        "employer_action": {"type": "string"}, "close_out": {"type": "string"},
+        "reportable": {"type": "boolean"}, "not_reportable_reason": {"type": "string"},
+        "questions": {"type": "array", "items": {"type": "string"}},
+    })
+    content = (f"Incident report:\n{json.dumps(incident, ensure_ascii=False)}\n\n"
+               f"Investigator's findings:\n{transcript}")
+    return llm.call(INVESTIGATION_SYSTEM, content, schema=schema)
 
 
 # ---------------------------------------------------------------- risk draft

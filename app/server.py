@@ -202,6 +202,7 @@ def site_d(x: db.Site) -> dict:
             "features": x.features or {}, "print_required": bool(x.print_required),
             "ra_only": bool((x.settings or {}).get("ra_only")),
             "facilities": (x.settings or {}).get("facilities") or {},
+            "consultants": (x.settings or {}).get("consultants") or [],
             "has_spec": bool((x.settings or {}).get("spec")), "has_ra": bool((x.settings or {}).get("ra"))}
 
 
@@ -319,6 +320,48 @@ def login(body: dict = Body(...)):
             raise HTTPException(401, "This company's account is switched off. Contact SiteBakkie.")
         u.last_login_at = db.utcnow()
         return {"token": auth.new_session(s, u)}
+
+
+RESET_TTL = timedelta(hours=2)
+
+
+@app.post("/api/password/forgot")
+def forgot_password(body: dict = Body(...)):
+    """Always gives the same answer, so nobody can test which emails have a login."""
+    email = _s(body.get("email")).lower()
+    with db.session() as s:
+        u = s.scalar(select(db.User).where(db.User.email == email))
+        if u and u.active:
+            token = secrets.token_urlsafe(24)
+            r = db.PasswordReset(token_hash=auth._th(token), user_id=u.id, expires_at=db.utcnow() + RESET_TTL)
+            s.add(r)
+            status = mailer.send(u.email, f"Reset your {config.APP_NAME} password",
+                                 f"Hi {u.name},\n\nSomeone asked to reset your {config.APP_NAME} password.\n"
+                                 f"Open this link within 2 hours to choose a new one:\n\n"
+                                 f"{config.PUBLIC_URL}/app.html#reset/{token}\n\n"
+                                 "If you did not ask for this, ignore this email.")
+            r.emailed = status.startswith("sent")
+            log.info("password reset for %s: %s", email, status)
+        else:
+            time.sleep(0.5)
+    return {"ok": True}
+
+
+@app.post("/api/password/reset")
+def reset_password(body: dict = Body(...)):
+    auth.valid_pw(body.get("password", ""))
+    with db.session() as s:
+        r = s.get(db.PasswordReset, auth._th(_s(body.get("token"), 100)))
+        if not r or r.used_at or r.expires_at < db.utcnow():
+            raise HTTPException(400, "This reset link is old or used. Ask for a new one.")
+        u = s.get(db.User, r.user_id)
+        if not u or not u.active:
+            raise HTTPException(400, "This login is switched off.")
+        r.used_at = db.utcnow()
+        u.pw_hash = auth.hash_pw(body["password"])
+        auth.end_all(s, u.id)
+        u.last_login_at = db.utcnow()
+        return {"token": auth.new_session(s, u), "email": u.email}
 
 
 @app.post("/api/logout")
@@ -459,6 +502,10 @@ def _site_fields(x: db.Site, body: dict) -> None:
         x.settings = {**(x.settings or {}), "facilities": fac}
     if "ra_only" in body:
         x.settings = {**(x.settings or {}), "ra_only": bool(body["ra_only"])}
+    if isinstance(body.get("consultants"), list):
+        cons = [{k: _s(c.get(k), 120) for k in ("name", "firm", "reg", "phone", "email")}
+                for c in body["consultants"][:2] if isinstance(c, dict) and _s(c.get("name"))]
+        x.settings = {**(x.settings or {}), "consultants": cons}
     if not x.name:
         raise HTTPException(400, "The site needs a name.")
 
@@ -833,6 +880,9 @@ def sync(site_id: str, ctx: Ctx = Depends(current)):
                 "visitor_ppe": library.VISITOR_PPE, "visitor_rules": library.VISITOR_RULES,
                 "audit_items": library.AUDIT_ITEMS, "aes_kinds": library.AES_DOCS,
                 "worker_consent": library.WORKER_CONSENT, "inspection_schedule": library.INSPECTION_SCHEDULE,
+                "incident_lists": {k.lower(): getattr(library, k) for k in (
+                    "BODY_PARTS", "EFFECTS", "DISABLEMENT", "DAMAGE", "AGENCIES_GENERAL", "AGENCIES_HYGIENE", "UNSAFE_ACTS",
+                    "UNSAFE_CONDITIONS", "PERSONAL_FACTORS", "JOB_FACTORS", "CONTROL_PERSONAL", "CONTROL_JOB")},
                 "forms": library.FORMS, "ra_roles": ((site.settings or {}).get("ra") or {}).get("roles", []),
                 "matrix": {"consequence": library.CONSEQUENCE, "likelihood": library.LIKELIHOOD},
                 "spec_rules": [r["rule"] for r in (((site.settings or {}).get("spec") or {}).get("key_rules") or [])],
@@ -956,23 +1006,45 @@ def record_pdf(rid: str, print: int = 0, ctx: Ctx = Depends(current)):
                         headers={"Content-Disposition": f'inline; filename="{name}"'})
 
 
+def _incident_bundle(s, ctx: Ctx, rid: str):
+    inc = _get(s, db.Record, rid, ctx, "Record")
+    if inc.kind != "incident":
+        raise HTTPException(400, "This is not an incident record.")
+    site = s.get(db.Site, inc.site_id)
+    related = s.scalars(select(db.Record).where(db.Record.company_id == ctx.cid,
+                                                db.Record.kind.in_(("investigation", "incident_close")))
+                        .options(selectinload(db.Record.signatures)).order_by(db.Record.seq)).all()
+    inv = next((r for r in reversed(related) if r.kind == "investigation" and r.payload.get("incident_id") == inc.id), None)
+    close = next((r for r in reversed(related) if r.kind == "incident_close"
+                  and (records.form_value(r, "incident") or {}).get("id") == inc.id), None)
+    ids = [x.get("worker_id") for x in inc.payload.get("people", []) if x.get("worker_id")]
+    id_files = [c.file for c in s.scalars(select(db.Credential).where(
+        db.Credential.company_id == ctx.cid, db.Credential.worker_id.in_(ids or [""]),
+        db.Credential.kind == "id_document")) if c.file]
+    consultants = (site.settings or {}).get("consultants") or []
+    return inc, site, inv, close, consultants, id_files
+
+
+INCIDENT_DOCS = {"pack": ("flash", "annexure", "form", "id", "photos"), "flash": ("flash",),
+                 "annexure1": ("annexure",), "investigation": ("form",)}
+
+
+@app.get("/api/records/{rid}/incident/{which}.pdf")
+def incident_pdf(rid: str, which: str, ctx: Ctx = Depends(current)):
+    if which not in INCIDENT_DOCS:
+        raise HTTPException(404, "Unknown document.")
+    with db.session() as s:
+        inc, site, inv, close, consultants, id_files = _incident_bundle(s, ctx, rid)
+        data = pdf.incident_pack(ctx.company, site, inc, inv, close, consultants, id_files, INCIDENT_DOCS[which])
+    name = {"pack": "Incident-pack", "flash": "Flash-report", "annexure1": "Annexure1",
+            "investigation": "Investigation"}[which]
+    return Response(data, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{name}-{inc.record_date}.pdf"'})
+
+
 @app.get("/api/records/{rid}/annexure1.pdf")
 def annexure1_pdf(rid: str, ctx: Ctx = Depends(current)):
-    with db.session() as s:
-        inc = _get(s, db.Record, rid, ctx, "Record")
-        if inc.kind != "incident":
-            raise HTTPException(400, "Annexure 1 is for incident records.")
-        site = s.get(db.Site, inc.site_id)
-        inv = next((r for r in s.scalars(select(db.Record).where(db.Record.company_id == ctx.cid,
-                                                                  db.Record.kind == "investigation")
-                                         .options(selectinload(db.Record.signatures)))
-                    if r.payload.get("incident_id") == inc.id), None)
-        ids = [x.get("worker_id") for x in inc.payload.get("people", []) if x.get("worker_id")]
-        info = {w.id: {"id_number": w.id_number, "trade": w.trade}
-                for w in s.scalars(select(db.Worker).where(db.Worker.company_id == ctx.cid, db.Worker.id.in_(ids or [""])))}
-        data = pdf.annexure1(ctx.company, site, inc, inv, info)
-    return Response(data, media_type="application/pdf",
-                    headers={"Content-Disposition": f'inline; filename="Annexure1-{inc.record_date}.pdf"'})
+    return incident_pdf(rid, "annexure1", ctx)
 
 
 # ---------------------------------------------------------------- Site Board
@@ -1259,10 +1331,16 @@ def list_incidents(site_id: str, ctx: Ctx = Depends(current)):
     with db.session() as s:
         _get(s, db.Site, site_id, ctx, "Site")
         recs = s.scalars(select(db.Record).where(db.Record.site_id == site_id,
-                                                 db.Record.kind.in_(("incident", "investigation")))
+                                                 db.Record.kind.in_(("incident", "investigation", "incident_close")))
                          .options(selectinload(db.Record.signatures))
                          .order_by(db.Record.record_date.desc())).all()
         inv = {r.payload.get("incident_id"): r for r in recs if r.kind == "investigation"}
+        closed = {}
+        for r in recs:
+            if r.kind == "incident_close":
+                f = next((f for f in r.payload.get("fields", []) if f.get("k") == "incident"), None)
+                if f and isinstance(f.get("value"), dict):
+                    closed[f["value"].get("id")] = r.id
         out = []
         for r in recs:
             if r.kind != "incident":
@@ -1270,7 +1348,8 @@ def list_incidents(site_id: str, ctx: Ctx = Depends(current)):
             i = inv.get(r.id)
             out.append(records.to_dict(r, False) | {
                 "type": r.payload.get("type"), "possibly_reportable": r.payload.get("possibly_reportable"),
-                "investigation_id": i.id if i else "", "days_open": (today() - r.record_date).days,
+                "investigation_id": i.id if i else "", "closed_id": closed.get(r.id, ""),
+                "title": r.payload.get("title") or "", "days_open": (today() - r.record_date).days,
                 "due": (r.record_date + timedelta(days=7)).isoformat()})
         return out
 
@@ -1551,11 +1630,26 @@ def ai_incident(site_id: str = Form(...), audio: UploadFile | None = File(None),
     with db.session() as s:
         _, _, workers, _ = _site_context(s, ctx, site_id)
     spoken, ref = _audio_text(ctx, audio, text)
-    draft = _ai(ai.incident, spoken, workers)
+    draft = _ai(ai.incident, spoken, workers, today().isoformat())
     ids = {w["id"] for w in workers}
     for p in draft.get("people", []):
         if p.get("worker_id") not in ids:
             p["worker_id"] = ""
+    return {"transcript": spoken, "audio": ref, "draft": draft}
+
+
+@app.post("/api/ai/investigation")
+def ai_investigation(incident_id: str = Form(...), audio: UploadFile | None = File(None), text: str = Form(""),
+                     ctx: Ctx = Depends(current)):
+    ctx.need(*auth.WRITE)
+    _limit(ctx)
+    with db.session() as s:
+        inc = _get(s, db.Record, incident_id, ctx, "Incident")
+        if inc.kind != "incident":
+            raise HTTPException(400, "Not an incident.")
+        facts = {k: v for k, v in inc.payload.items() if k not in ("photos",)}
+    spoken, ref = _audio_text(ctx, audio, text)
+    draft = _ai(ai.investigation, spoken, facts)
     return {"transcript": spoken, "audio": ref, "draft": draft}
 
 
@@ -1678,10 +1772,16 @@ def admin_overview():
                     "created_at": i.created_at.date().isoformat()}
                    for i in s.scalars(select(db.InviteCode).order_by(db.InviteCode.created_at))]
         env_codes = sorted(SIGNUP_CODE - {i["code"] for i in invites})
+        resets = [{"email": u.email, "name": u.name, "user_id": u.id, "at": r.created_at.isoformat(timespec="minutes"),
+                   "emailed": r.emailed, "used": bool(r.used_at)}
+                  for r, u in s.execute(select(db.PasswordReset, db.User).join(db.User, db.User.id == db.PasswordReset.user_id)
+                                        .where(db.PasswordReset.created_at >= week)
+                                        .order_by(db.PasswordReset.created_at.desc()).limit(20))]
         return {"totals": {"companies": len(companies), "users": count(db.User), "sites": count(db.Site),
                            "workers": count(db.Worker), "records": count(db.Record),
                            "records_7d": count(db.Record, db.Record.received_at >= week)},
-                "companies": companies, "invites": invites, "env_invites": env_codes, "roles": auth.ROLES}
+                "companies": companies, "invites": invites, "env_invites": env_codes, "roles": auth.ROLES,
+                "resets": resets}
 
 
 @app.post("/api/admin/invites", dependencies=[Depends(admin)])

@@ -97,6 +97,11 @@ VIEWS.setup = () => {
       `<label class="check"><input type="checkbox" data-f="${k}" ${f[k] ? "checked" : ""}> ${esc(v)}</label>`).join("")}</div>
     <div class="card"><b>Facilities on site</b><div class="grid2"><div><label>Toilets</label><input id="su-toilets" inputmode="numeric" value="${esc(site.facilities?.toilets ?? "")}"></div>
       <div><label>Showers</label><input id="su-showers" inputmode="numeric" value="${esc(site.facilities?.showers ?? "")}"></div></div></div>
+    <div class="card"><b>Safety consultant</b><p class="small muted">Their name goes on the letterhead of the incident flash report.</p>
+      ${[0, 1].map((i) => { const c = (site.consultants || [])[i] || {}; return `<details ${i === 0 || c.name ? "open" : ""}><summary class="small">${i === 0 ? "Consultant" : "Second consultant (optional)"}</summary>
+        <div class="grid2"><input data-cons="${i}" data-ck="name" value="${esc(c.name || "")}" placeholder="Name"><input data-cons="${i}" data-ck="firm" value="${esc(c.firm || "")}" placeholder="Firm"></div>
+        <div class="grid2"><input data-cons="${i}" data-ck="reg" value="${esc(c.reg || "")}" placeholder="Registration (SACPCMP / Saiosh no.)"><input data-cons="${i}" data-ck="phone" type="tel" value="${esc(c.phone || "")}" placeholder="Phone"></div>
+        <input data-cons="${i}" data-ck="email" type="email" value="${esc(c.email || "")}" placeholder="Email"></details>`; }).join("")}</div>
     ${site.has_ra ? `<div class="card"><label class="check"><input type="checkbox" id="su-raonly" ${site.ra_only ? "checked" : ""}> Use only the consultant's risk assessment on this site</label></div>` : ""}
     <div class="card"><label class="check"><input type="checkbox" id="su-print" ${site.print_required ? "checked" : ""}> The client wants paper copies</label>
       <p class="muted small">The app still keeps the electronic original. Use the Print centre for the paper copies.</p></div>
@@ -110,6 +115,7 @@ ACT["setup-save"] = (btn) => busy(btn, "Saving…", async () => {
   const body = { features, print_required: $("#su-print").checked,
     facilities: { toilets: $("#su-toilets").value || "0", showers: $("#su-showers").value || "0" } };
   if ($("#su-raonly")) body.ra_only = $("#su-raonly").checked;
+  body.consultants = [0, 1].map((i) => Object.fromEntries([...document.querySelectorAll(`[data-cons="${i}"]`)].map((el) => [el.dataset.ck, el.value.trim()])));
   await api("/api/sites/" + S.siteId, { method: "PUT", json: body });
   await loadMe(); await loadSite(true); toast("Saved.", "ok"); go("board");
 });

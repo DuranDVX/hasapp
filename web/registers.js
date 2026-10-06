@@ -297,29 +297,75 @@ VIEWS.incidents = async () => {
   if (needOnline()) return;
   const list = await api("/api/incidents?site_id=" + S.siteId);
   render(`${head("Incidents", "Investigate every incident within 7 days (GAR 9). Report serious ones to the Department within 7 days (OHS Act s24).", "board")}
-    ${list.length ? list.map((r) => { const left = 7 - r.days_open, done = !!r.investigation_id;
-      const st = done ? "green" : left < 0 ? "red" : r.possibly_reportable ? "red" : "amber";
-      return `<div class="card"><div class="row between"><b>${esc(r.record_date)}</b><span class="badge ${st}">${done ? "Investigated" : left < 0 ? `${-left} day(s) late` : `${left} day(s) left`}</span></div>
-        <p class="small">${esc(r.summary)}</p>${r.possibly_reportable && !done ? `<div class="note bad small">Possibly reportable to the Department of Employment and Labour.</div>` : ""}
+    ${list.length ? list.map((r) => { const left = 7 - r.days_open, done = !!r.investigation_id, closed = !!r.closed_id;
+      const st = closed ? "green" : done ? "amber" : left < 0 ? "red" : r.possibly_reportable ? "red" : "amber";
+      const badge = closed ? "Closed out" : done ? "Investigated, not closed" : left < 0 ? `${-left} day(s) late` : `${left} day(s) left`;
+      return `<div class="card"><div class="row between"><b>${esc(r.record_date)}</b><span class="badge ${st}">${badge}</span></div>
+        ${r.title ? `<b>${esc(r.title)}</b>` : ""}<p class="small">${esc(r.summary)}</p>${r.possibly_reportable && !done ? `<div class="note bad small">Possibly reportable to the Department of Employment and Labour.</div>` : ""}
         <div class="grid2"><button data-act="nav" data-to="record/${r.id}">Open</button>
-          ${done ? `<button data-act="pdf" data-path="/api/records/${r.id}/annexure1.pdf">Annexure 1</button>` : `<button class="primary" data-act="nav" data-to="investigate/${r.id}">Investigate</button>`}</div></div>`;
+          ${done ? (closed ? `<button data-act="nav" data-to="record/${r.closed_id}">Close-out</button>` : `<button class="primary" data-act="nav" data-to="form/incident_close/${r.id}">Close out</button>`)
+            : `<button class="primary" data-act="nav" data-to="investigate/${r.id}">Investigate</button>`}</div>
+        <button class="dark" data-act="pdf" data-path="/api/records/${r.id}/incident/pack.pdf" style="margin-top:8px">📄 Incident pack (all forms)</button>
+        <details class="small" style="margin-top:6px"><summary>Single forms</summary><div class="grid2" style="margin-top:6px">
+          <button class="small" data-act="pdf" data-path="/api/records/${r.id}/incident/flash.pdf">Flash report</button>
+          <button class="small" data-act="pdf" data-path="/api/records/${r.id}/incident/annexure1.pdf">Annexure 1</button>
+          ${done ? `<button class="small" data-act="pdf" data-path="/api/records/${r.id}/incident/investigation.pdf">Investigation form</button>` : ""}</div></details></div>`;
     }).join("") : `<div class="note ok">No incidents recorded.</div>`}
     ${can.write() ? actionBar(`<button class="danger" data-act="nav" data-to="incident">🚨 Report an incident</button>`) : ""}`);
 };
+const IV_LISTS = [["agencies_general", "Agency of accident: general"], ["agencies_hygiene", "Agency of accident: occupational hygiene"],
+  ["unsafe_acts", "Unsafe acts"], ["unsafe_conditions", "Unsafe conditions"], ["personal_factors", "Personal factors"], ["job_factors", "Job factors"],
+  ["control_personal", "Control measures: personal"], ["control_job", "Control measures: job"]];
 VIEWS.investigate = async (id) => {
   if (needOnline()) return;
   const inc = await api("/api/records/" + id);
-  const p = inc.payload;
-  const d = { findings: "", causes: "", actions: [{ action: "", owner: "", due: "" }], reportable: !!p.possibly_reportable,
-    dol: { date: "", ref: "" }, cf: { date: "", ref: "" }, reason: "" };
+  const p = inc.payload, L = S.data.incident_lists, key = `draft:iv:${id}`;
+  let d = await IDB.get(key);
+  const blank = () => ({ investigator: me().name, designation: "", short_description: p.title || "", suspected_cause: "", findings: "", causes: "",
+    normal_work: null, actions: [{ action: "", owner: "", due: "" }], employer_action: "", close_out: "", committee_remarks: "",
+    reportable: !!p.possibly_reportable, dol: { date: "", ref: "" }, cf: { date: "", ref: "" }, reason: "", questions: [],
+    ...Object.fromEntries(IV_LISTS.map(([k]) => [k, []])) });
+  const save = () => IDB.set(key, d);
+  const redraw = () => { const y = scrollY; draw(); scrollTo(0, y); };
+  const intro = () => {
+    render(`${head("Investigate", `Incident of ${esc(inc.record_date)}: ${esc(p.title || (p.description || "").slice(0, 120))}`, "incidents")}
+      ${micBlock("Say what you found: why it happened, what the person and the site did wrong, what was missing, and what you will change. The app ticks the investigation boxes for you to check.")}
+      <details class="card"><summary>Type it instead</summary><textarea id="iv-text" style="min-height:140px"></textarea>
+        <button class="dark" data-act="iv-text">Use this text</button></details>
+      <button class="link" data-act="iv-manual">Fill in the form by hand</button>`);
+    micHandler = (blob) => fromAI(blob, "");
+  };
+  const fromAI = (blob, text) => voiceToAI("/api/ai/investigation", blob, text, async (r) => {
+    const x = r.draft; d = blank();
+    Object.assign(d, x, { causes: (x.root_causes || []).join("\n"), reason: x.not_reportable_reason || "",
+      actions: x.actions?.length ? x.actions : d.actions, investigator: x.investigator || me().name });
+    await save(); draw();
+  }, async () => { d = blank(); d.findings = text; await save(); draw(); }, { incident_id: id });
+  ACT["iv-text"] = () => { const t = $("#iv-text").value.trim(); if (!t) return toast("Type what you found first.", "bad"); fromAI(null, t); };
+  ACT["iv-manual"] = async () => { d = blank(); await save(); draw(); };
+  const chips = (k, all) => `<div class="chips">${all.map((o) => `<button class="chip ${d[k].includes(o) ? "on" : ""}" data-act="iv-chip" data-k="${k}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
   const draw = () => {
-    render(`${head("Investigate", `Incident of ${esc(inc.record_date)}: ${esc((p.description || "").slice(0, 120))}`, "incidents")}
-      <div class="card"><label>What did the investigation find?</label><textarea id="iv-f">${esc(d.findings)}</textarea>
-        <label>Root causes (one per line)</label><textarea id="iv-c">${esc(d.causes)}</textarea></div>
+    const ticked = IV_LISTS.reduce((n, [k]) => n + d[k].length, 0);
+    render(`<div class="row between"><h1 style="margin:0">Investigation</h1><button class="link" data-act="iv-reset">Start again</button></div>
+      <p class="muted small">Incident of ${esc(inc.record_date)}: ${esc(p.title || (p.description || "").slice(0, 120))}</p>
+      ${d.questions?.length ? `<div class="note warn"><b>Still to find out:</b>${d.questions.map((q) => `<div>• ${esc(q)}</div>`).join("")}</div>` : ""}
+      <div class="card"><div class="grid2"><div><label>Investigator</label><input data-iv="investigator" value="${esc(d.investigator)}"></div>
+        <div><label>Designation</label><input data-iv="designation" value="${esc(d.designation)}" placeholder="Site manager"></div></div>
+        <label>Short description of the incident</label><textarea data-iv="short_description">${esc(d.short_description)}</textarea>
+        <label>Suspected cause</label><textarea data-iv="suspected_cause">${esc(d.suspected_cause)}</textarea>
+        <label>What did the investigation find?</label><textarea data-iv="findings" style="min-height:140px">${esc(d.findings)}</textarea>
+        <label>Root causes (one per line)</label><textarea data-iv="causes">${esc(d.causes)}</textarea>
+        <label>Was the person doing their normal work?</label><div class="answer" style="grid-template-columns:1fr 1fr 1fr">${[["Yes", true], ["No", false], ["Unknown", null]].map(([l, b]) =>
+          `<button class="${b === true ? "ok" : b === false ? "defect" : "na"} ${d.normal_work === b ? "on" : ""}" data-act="iv-normal" data-v="${b}">${l}</button>`).join("")}</div></div>
+      <h2>Cause checklists <span class="muted small">(${ticked} ticked)</span></h2>
+      ${IV_LISTS.map(([k, t]) => `<details class="card" ${d[k].length ? "open" : ""}><summary><b>${t}</b> ${d[k].length ? `<span class="badge ok">${d[k].length}</span>` : ""}</summary>${chips(k, L[k])}</details>`).join("")}
       <h2>Corrective actions</h2>
       ${d.actions.map((a, i) => `<div class="card"><input data-ai="${i}" data-k="action" value="${esc(a.action)}" placeholder="Action">
         <div class="grid2"><input data-ai="${i}" data-k="owner" value="${esc(a.owner)}" placeholder="Responsible"><input data-ai="${i}" data-k="due" type="date" value="${esc(a.due)}"></div></div>`).join("")}
       <button data-act="iv-add">+ Add an action</button>
+      <div class="card" style="margin-top:10px"><label>Action taken by the employer</label><textarea data-iv="employer_action">${esc(d.employer_action)}</textarea>
+        <label>Close-out of the investigation</label><textarea data-iv="close_out">${esc(d.close_out)}</textarea>
+        <label>H&amp;S committee remarks</label><textarea data-iv="committee_remarks">${esc(d.committee_remarks)}</textarea></div>
       <h2>Reporting</h2><div class="card"><label class="check"><input type="checkbox" id="iv-rep" ${d.reportable ? "checked" : ""}> Reportable under section 24 of the OHS Act</label>
         ${d.reportable ? `<label>Reported to the Department of Employment and Labour on</label><div class="grid2"><input id="iv-dd" type="date" value="${esc(d.dol.date)}"><input id="iv-dr" placeholder="Reference" value="${esc(d.dol.ref)}"></div>
           <label>Reported to the Compensation Fund (W.Cl.2) on</label><div class="grid2"><input id="iv-cd" type="date" value="${esc(d.cf.date)}"><input id="iv-cr" placeholder="Reference" value="${esc(d.cf.ref)}"></div>`
@@ -327,23 +373,31 @@ VIEWS.investigate = async (id) => {
       ${actionBar(`<button class="primary" data-act="iv-sign">Sign the investigation</button>`)}`);
     $("#view").oninput = $("#view").onchange = (e) => {
       const t = e.target;
-      if (t.id === "iv-f") d.findings = t.value; if (t.id === "iv-c") d.causes = t.value; if (t.id === "iv-why") d.reason = t.value;
+      if (t.dataset.iv) d[t.dataset.iv] = t.value;
+      if (t.id === "iv-why") d.reason = t.value;
       if (t.id === "iv-dd") d.dol.date = t.value; if (t.id === "iv-dr") d.dol.ref = t.value; if (t.id === "iv-cd") d.cf.date = t.value; if (t.id === "iv-cr") d.cf.ref = t.value;
       if (t.dataset.ai !== undefined) d.actions[+t.dataset.ai][t.dataset.k] = t.value;
-      if (t.id === "iv-rep") { d.reportable = t.checked; const y = scrollY; draw(); scrollTo(0, y); }
+      save();
+      if (t.id === "iv-rep") { d.reportable = t.checked; save(); redraw(); }
     };
   };
-  ACT["iv-add"] = () => { const y = scrollY; d.actions.push({ action: "", owner: "", due: "" }); draw(); scrollTo(0, y); };
+  ACT["iv-chip"] = (el) => { toggle(d[el.dataset.k], el.dataset.v); save(); redraw(); };
+  ACT["iv-normal"] = (el) => { d.normal_work = el.dataset.v === "null" ? null : el.dataset.v === "true"; save(); redraw(); };
+  ACT["iv-add"] = () => { d.actions.push({ action: "", owner: "", due: "" }); save(); redraw(); };
+  ACT["iv-reset"] = async () => { if (confirm("Throw away this investigation draft?")) { await IDB.del(key); d = null; intro(); } };
   ACT["iv-sign"] = async (btn) => {
     if (!d.findings.trim()) return toast("Write what the investigation found.", "bad");
     if (d.reportable && !d.dol.date) return toast("Give the date you reported it to the Department.", "bad");
-    const s = await signatureModal({ name: me().name, subtitle: "Investigator: this investigation is true and complete.", photo: false });
+    const s = await signatureModal({ name: d.investigator || me().name, subtitle: "Investigator: this investigation is true and complete.", photo: false });
     if (!s) return;
     btn.disabled = true;
-    await finishRecord("investigation", { incident_id: id, findings: d.findings, root_causes: d.causes.split("\n").map((x) => x.trim()).filter(Boolean),
-      actions: d.actions.filter((a) => a.action.trim()), reportable: d.reportable, reported_dol: d.dol, reported_cf: d.cf, not_reportable_reason: d.reason },
+    const keys = ["investigator", "designation", "short_description", "suspected_cause", "findings", "normal_work", "employer_action", "close_out",
+      "committee_remarks", "reportable", ...IV_LISTS.map(([k]) => k)];
+    await finishRecord("investigation", { incident_id: id, ...Object.fromEntries(keys.map((k) => [k, d[k]])),
+      root_causes: d.causes.split("\n").map((x) => x.trim()).filter(Boolean), actions: d.actions.filter((a) => a.action.trim()),
+      reported_dol: d.dol, reported_cf: d.cf, not_reportable_reason: d.reason },
       [{ ...s, user_id: me().id, role: "investigator" }], { label: "Investigation" });
-    go("incidents");
+    await IDB.del(key); go("incidents");
   };
-  draw();
+  d ? draw() : intro();
 };

@@ -321,3 +321,27 @@ def _platform_admin():
     r = client.post("/api/signup", json={"company": "X", "name": "Y", "email": f"{uuid.uuid4().hex[:8]}@t.co",
                                          "password": "longenough", "invite": code})
     assert r.status_code == 403
+
+
+def test_forgot_and_reset_password():
+    from datetime import timedelta
+
+    from sqlalchemy import select
+
+    from app import auth
+    email = f"reset-{uuid.uuid4().hex[:6]}@test.co"
+    r = client.post("/api/signup", json={"company": "Reset Co", "name": "Rita", "email": email, "password": "first-pass-1"})
+    assert r.status_code == 200, r.text
+    assert client.post("/api/password/forgot", json={"email": "nobody@example.com"}).json() == {"ok": True}
+    assert client.post("/api/password/forgot", json={"email": email.upper()}).json() == {"ok": True}
+    # The token goes out by email only; make a known one for the test.
+    with db.session() as s:
+        u = s.scalar(select(db.User).where(db.User.email == email))
+        assert s.scalar(select(db.PasswordReset).where(db.PasswordReset.user_id == u.id))   # the forgot call made one
+        s.add(db.PasswordReset(token_hash=auth._th("tok-123"), user_id=u.id, expires_at=db.utcnow() + timedelta(hours=1)))
+    assert client.post("/api/password/reset", json={"token": "bad", "password": "new-pass-22"}).status_code == 400
+    r = client.post("/api/password/reset", json={"token": "tok-123", "password": "new-pass-22"})
+    assert r.status_code == 200 and r.json()["email"] == email
+    assert client.post("/api/password/reset", json={"token": "tok-123", "password": "again-pass-3"}).status_code == 400
+    assert client.post("/api/login", json={"email": email, "password": "first-pass-1"}).status_code == 401
+    assert client.post("/api/login", json={"email": email, "password": "new-pass-22"}).status_code == 200

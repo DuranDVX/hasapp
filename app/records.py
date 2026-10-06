@@ -151,21 +151,49 @@ def _check(s, cid, site_id, p: dict) -> dict:
             "items": items, "result": result, "notes": _text(p.get("notes"), 1000)}
 
 
+def _pick(values, allowed) -> list:
+    return [v for v in (values or []) if v in allowed]
+
+
+def _opt_bool(v):
+    return None if v in (None, "", "unknown") else bool(v) and v not in ("no", "false")
+
+
 def _incident(s, cid, site_id, p: dict) -> dict:
     kind = p.get("type") if p.get("type") in library.INCIDENT_TYPES else "other"
     people = []
     for x in (p.get("people") or [])[:20]:
-        if isinstance(x, dict):
-            people.append({"name": _text(x.get("name"), 200), "worker_id": _text(x.get("worker_id"), 16),
-                           "injury": _text(x.get("injury"), 500), "treatment": _text(x.get("treatment"), 500)})
-    out = {"type": kind, "occurred_at": _text(p.get("occurred_at"), 60), "location": _text(p.get("location"), 200),
-           "description": _text(p.get("description"), 4000), "people": people,
-           "witnesses": [_text(w, 200) for w in (p.get("witnesses") or [])[:20]],
-           "immediate_actions": _text(p.get("immediate_actions"), 2000),
+        if not isinstance(x, dict):
+            continue
+        w = s.get(db.Worker, x.get("worker_id") or "")
+        w = w if w and w.company_id == cid else None
+        m = x.get("medical") if isinstance(x.get("medical"), dict) else {}
+        people.append({
+            "name": w.name if w else _text(x.get("name"), 200), "worker_id": w.id if w else "",
+            "id_number": (w.id_number if w else "") or _text(x.get("id_number"), 40),
+            "occupation": (w.trade if w else "") or _text(x.get("occupation"), 100),
+            "injury": _text(x.get("injury"), 500), "treatment": _text(x.get("treatment"), 500),
+            "body_parts": _pick(x.get("body_parts"), library.BODY_PARTS),
+            "effects": _pick(x.get("effects"), library.EFFECTS), "effect_other": _text(x.get("effect_other"), 200),
+            "disablement": x.get("disablement") if x.get("disablement") in library.DISABLEMENT else "",
+            "medical": {"clinic": _text(m.get("clinic"), 1000), "pre_existing": _text(m.get("pre_existing"), 300),
+                        "physio": _opt_bool(m.get("physio")), "unfit": _opt_bool(m.get("unfit")),
+                        "light_duty_date": _text(m.get("light_duty_date"), 20),
+                        "resumption_date": _text(m.get("resumption_date"), 20)}})
+    photos = [ph for ph in (p.get("photos") or [])[:12]]
+    captions = [_text(c, 200) for c in (p.get("photo_captions") or [])[:12]]
+    out = {"type": kind, "title": _text(p.get("title"), 200),
+           "occurred_at": _text(p.get("occurred_at"), 60), "location": _text(p.get("location"), 200),
+           "reported_by": _text(p.get("reported_by"), 200), "reporter_contact": _text(p.get("reporter_contact"), 60),
+           "work_type": _text(p.get("work_type"), 300),
+           "description": _text(p.get("description"), 6000), "people": people,
+           "damage": _pick(p.get("damage"), library.DAMAGE), "damage_note": _text(p.get("damage_note"), 300),
+           "witnesses": [_text(w, 200) for w in (p.get("witnesses") or [])[:20] if _text(w)],
+           "immediate_actions": _text(p.get("immediate_actions"), 4000),
            "possible_causes": [_text(c, 300) for c in (p.get("possible_causes") or [])[:10]],
            "possibly_reportable": bool(p.get("possibly_reportable")),
            "reportable_reason": _text(p.get("reportable_reason"), 500),
-           "photos": (p.get("photos") or [])[:10]}
+           "photos": photos, "photo_captions": captions + [""] * (len(photos) - len(captions))}
     if not out["description"]:
         raise HTTPException(400, "Describe what happened.")
     return out
@@ -260,13 +288,29 @@ def _investigation(s, cid, site_id, p: dict) -> dict:
     def _rep(x):
         x = x if isinstance(x, dict) else {}
         return {"date": _text(x.get("date"), 10), "ref": _text(x.get("ref"), 100)}
+    lines = lambda v, n=10: [_text(x, 400) for x in (v or [])[:n] if _text(x)]
     out = {"incident_id": inc.id, "incident_date": inc.record_date.isoformat(),
            "incident_summary": _text(inc.payload.get("description"), 300),
-           "findings": _text(p.get("findings"), 4000),
-           "root_causes": [_text(x, 300) for x in (p.get("root_causes") or [])[:10] if _text(x)],
+           "investigator": _text(p.get("investigator"), 200), "designation": _text(p.get("designation"), 200),
+           "short_description": _text(p.get("short_description"), 1000),
+           "suspected_cause": _text(p.get("suspected_cause"), 1000),
+           "findings": _text(p.get("findings"), 6000),
+           "root_causes": lines(p.get("root_causes")),
+           "agencies_general": _pick(p.get("agencies_general"), library.AGENCIES_GENERAL),
+           "agencies_hygiene": _pick(p.get("agencies_hygiene"), library.AGENCIES_HYGIENE),
+           "normal_work": _opt_bool(p.get("normal_work")),
+           "unsafe_acts": _pick(p.get("unsafe_acts"), library.UNSAFE_ACTS),
+           "unsafe_conditions": _pick(p.get("unsafe_conditions"), library.UNSAFE_CONDITIONS),
+           "personal_factors": _pick(p.get("personal_factors"), library.PERSONAL_FACTORS),
+           "job_factors": _pick(p.get("job_factors"), library.JOB_FACTORS),
+           "control_personal": _pick(p.get("control_personal"), library.CONTROL_PERSONAL),
+           "control_job": _pick(p.get("control_job"), library.CONTROL_JOB),
            "actions": [{"action": _text(a.get("action"), 500), "owner": _text(a.get("owner"), 200),
                         "due": _text(a.get("due"), 10)} for a in (p.get("actions") or [])[:20]
                        if isinstance(a, dict) and _text(a.get("action"))],
+           "employer_action": _text(p.get("employer_action"), 2000),
+           "close_out": _text(p.get("close_out"), 2000),
+           "committee_remarks": _text(p.get("committee_remarks"), 2000),
            "reportable": bool(p.get("reportable")), "not_reportable_reason": _text(p.get("not_reportable_reason"), 500),
            "reported_dol": _rep(p.get("reported_dol")), "reported_cf": _rep(p.get("reported_cf"))}
     if not out["findings"]:
@@ -300,6 +344,11 @@ def _form(s, cid, site_id, kind: str, p: dict) -> dict:
             if v and (not w or w.company_id != cid):
                 raise HTTPException(400, "Unknown worker.")
             val = {"id": w.id, "name": w.name} if w else None
+        elif t == "open_incident":
+            r = s.get(db.Record, v or "")
+            if v and (not r or r.company_id != cid or r.kind != "incident"):
+                raise HTTPException(400, "Unknown incident.")
+            val = {"id": r.id, "date": r.record_date.isoformat(), "summary": summary(r)} if r else None
         elif t == "open_permit":
             r = s.get(db.Record, v or "")
             if v and (not r or r.company_id != cid or r.kind != "permit"):
@@ -310,7 +359,8 @@ def _form(s, cid, site_id, kind: str, p: dict) -> dict:
         empty = val in (None, "", [])
         if f.get("req") and empty:
             raise HTTPException(400, f"Fill in: {f['label']}.")
-        if f["type"] == "yesno" and f.get("req") and f["k"] in ("understood", "complete") and val is not True:
+        if f["type"] == "yesno" and f.get("req") and f["k"] in ("understood", "complete", "actions_done", "safe") \
+                and val is not True:
             raise HTTPException(400, f"{f['label']}: this must be yes before signing.")
         out["fields"].append({"k": f["k"], "label": f["label"], "type": t, "value": val})
     return out
@@ -475,7 +525,7 @@ def summary(rec: db.Record) -> str:
         res = {"pass": "Pass", "defects": "Defects noted", "fail": "FAIL: do not use"}[p.get("result", "pass")]
         return f"{p.get('plant_name') or p.get('title')} · {res}"
     if rec.kind == "incident":
-        return f"{library.INCIDENT_TYPES.get(p.get('type'), 'Incident')}: {p.get('description', '')[:80]}"
+        return f"{library.INCIDENT_TYPES.get(p.get('type'), 'Incident')}: {(p.get('title') or p.get('description', ''))[:80]}"
     if rec.kind == "induction":
         return p.get("worker_name", "")
     if rec.kind == "visitor":
@@ -498,7 +548,8 @@ def summary(rec: db.Record) -> str:
                 "ppe_issue": lambda: f"{v('worker')}: {v('items')}",
                 "permit": lambda: f"{v('type')} · {v('location')} · until {v('valid_until')}",
                 "permit_close": lambda: f"Closed: {(form_value(rec, 'permit') or {}).get('summary', '')}",
-                "ra_acceptance": lambda: f"{v('role')}"}.get(rec.kind, lambda: "")()
+                "ra_acceptance": lambda: f"{v('role')}",
+                "incident_close": lambda: f"Closed: {(form_value(rec, 'incident') or {}).get('summary', '')}"}.get(rec.kind, lambda: "")()
     return ""
 
 

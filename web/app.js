@@ -154,7 +154,8 @@ async function route() {
   const [name, ...args] = (location.hash.slice(1) || "board").split("/");
   document.querySelectorAll("nav.bottom a").forEach((a) => a.classList.toggle("on", a.dataset.nav === NAV_OF[name]));
   $(".fab")?.classList.toggle("hidden", !S.me || !can.write() || !FAB_ON.includes(name));
-  if (!S.token) return VIEWS[name === "signup" ? "signup" : "login"]();
+  if (name === "reset") return VIEWS.reset(args[0]);
+  if (!S.token) return VIEWS[["signup", "forgot"].includes(name) ? name : "login"]();
   if (!S.me) return;
   if (!S.siteId || !S.data) { if (!["sites", "site", "more", "profile", "company", "users", "esign"].includes(name)) return VIEWS.sites(); }
   const view = VIEWS[name === "today" ? "board" : name] || VIEWS.board;
@@ -171,12 +172,17 @@ document.addEventListener("click", (e) => {
 
 // ---------------------------------------------------------------- login / signup
 
+const pwInput = (id, ac, ph = "") => `<div class="pw-wrap"><input id="${id}" type="password" autocomplete="${ac}" autocapitalize="off" autocorrect="off" spellcheck="false" placeholder="${ph}">
+  <button type="button" class="pw-eye" data-act="pw-eye" data-for="${id}" aria-label="Show password">Show</button></div>`;
+ACT["pw-eye"] = (b) => { const i = $("#" + b.dataset.for), show = i.type === "password"; i.type = show ? "text" : "password"; b.textContent = show ? "Hide" : "Show"; };
+const emailInput = (id) => `<input id="${id}" type="email" inputmode="email" autocomplete="username" autocapitalize="off" autocorrect="off" spellcheck="false">`;
 VIEWS.login = () => {
   render(`<img src="/logo.png" alt="SiteBakkie" style="width:min(320px,85%);display:block;margin:18px 0 6px">
     <p class="muted">Site health and safety, without the paper. From the makers of <a href="https://www.quotebakkie.co.za" target="_blank">QuoteBakkie</a>.</p>
-    <div class="card"><label>Email</label><input id="l-email" type="email" autocomplete="username">
-    <label>Password</label><input id="l-pw" type="password" autocomplete="current-password">
-    <button class="primary" data-act="login">Log in</button></div>
+    <div class="card"><label>Email</label>${emailInput("l-email")}
+    <label>Password</label>${pwInput("l-pw", "current-password")}
+    <button class="primary" data-act="login">Log in</button>
+    <p class="center small" style="margin:10px 0 0"><a href="#forgot">Forgot your password?</a></p></div>
     <p class="center"><a href="#signup">New company? Create an account</a></p>`);
   $("#l-pw").onkeydown = (e) => { if (e.key === "Enter") ACT.login($("[data-act=login]")); };
 };
@@ -184,19 +190,50 @@ ACT.login = (btn) => busy(btn, "Logging in…", async () => {
   const r = await api("/api/login", { json: { email: $("#l-email").value.trim(), password: $("#l-pw").value } });
   await afterLogin(r.token);
 });
+VIEWS.forgot = () => {
+  render(`<h1>Forgot your password</h1>
+    <div class="card"><p class="small">Type the email you log in with. We send a link to choose a new password.</p>
+    <label>Email</label>${emailInput("f-email")}
+    <button class="primary" data-act="forgot">Send the link</button><div id="f-out"></div></div>
+    <p class="center"><a href="#login">Back to log in</a></p>`);
+};
+ACT.forgot = (btn) => busy(btn, "Sending…", async () => {
+  const email = $("#f-email").value.trim();
+  if (!email.includes("@")) return toast("Type your email.", "bad");
+  await api("/api/password/forgot", { json: { email } });
+  $("#f-out").innerHTML = `<div class="note ok" style="margin-top:10px">If <b>${esc(email)}</b> has a login, a link is on its way. Look in your spam folder too.
+    No email after 10 minutes? Ask your company owner, or SiteBakkie, for a new password.</div>`;
+});
+VIEWS.reset = (token) => {
+  render(`<h1>Choose a new password</h1>
+    <div class="card"><label>New password (8 or more characters)</label>${pwInput("r-pw", "new-password")}
+    <label>Type it again</label>${pwInput("r-pw2", "new-password")}
+    <button class="primary" data-act="reset" data-token="${esc(token || "")}">Save and log in</button></div>`);
+};
+ACT.reset = (btn) => busy(btn, "Saving…", async () => {
+  const pw = $("#r-pw").value;
+  if (pw.length < 8) return toast("Use 8 or more characters.", "bad");
+  if (pw !== $("#r-pw2").value) return toast("The two passwords are not the same.", "bad");
+  const r = await api("/api/password/reset", { json: { token: btn.dataset.token, password: pw } });
+  history.replaceState(null, "", "#board"); toast(`Password saved. Log in next time with ${r.email}.`, "ok");
+  await afterLogin(r.token);
+});
 VIEWS.signup = () => {
   render(`<h1>Create your company</h1>
-    <div class="card"><label>Company name</label><input id="s-co">
+    <div class="card"><label>Company name</label><input id="s-co" autocomplete="organization">
     <label>Your name</label><input id="s-name" autocomplete="name">
-    <label>Email</label><input id="s-email" type="email" autocomplete="username">
-    <label>Password (8 or more characters)</label><input id="s-pw" type="password" autocomplete="new-password">
-    <label>Invite code (pilot)</label><input id="s-inv">
+    <label>Email</label>${emailInput("s-email")}
+    <label>Password (8 or more characters)</label>${pwInput("s-pw", "new-password")}
+    <label>Type the password again</label>${pwInput("s-pw2", "new-password")}
+    <label>Invite code (pilot)</label><input id="s-inv" autocapitalize="off" autocorrect="off" spellcheck="false">
     <button class="primary" data-act="signup">Create account</button></div>
     <p class="center"><a href="#login">I already have a login</a></p>`);
 };
 ACT.signup = (btn) => busy(btn, "Creating…", async () => {
-  const r = await api("/api/signup", { json: { company: $("#s-co").value, name: $("#s-name").value, email: $("#s-email").value,
-    password: $("#s-pw").value, invite: $("#s-inv").value } });
+  const pw = $("#s-pw").value;
+  if (pw !== $("#s-pw2").value) return toast("The two passwords are not the same. Type them again.", "bad");
+  const r = await api("/api/signup", { json: { company: $("#s-co").value, name: $("#s-name").value, email: $("#s-email").value.trim(),
+    password: pw, invite: $("#s-inv").value.trim() } });
   await afterLogin(r.token); go("site/new");
 });
 async function afterLogin(token) {
@@ -317,7 +354,8 @@ VIEWS.record = async (id) => {
       ${it.photo?.url ? `<img class="thumb" src="${it.photo.url}">` : ""}</td><td><b class="${it.answer === "defect" ? "crit" : ""}">${{ ok: "OK", defect: "DEFECT", na: "N/A" }[it.answer]}</b></td></tr>`).join("")}</table></div>`;
   } else if (r.kind === "incident") {
     body = `${p.possibly_reportable ? `<div class="note bad">Possibly reportable: ${esc(p.reportable_reason)}</div>` : ""}
-      <div class="card"><b>${esc(S.data.incident_types[p.type] || p.type)}</b><p>${esc(p.description)}</p>
+      <div class="card"><b>${esc(p.title || S.data.incident_types[p.type] || p.type)}</b>
+      <div class="muted small">${esc(S.data.incident_types[p.type] || p.type)}${p.reported_by ? ` · reported by ${esc(p.reported_by)}` : ""}${p.work_type ? ` · ${esc(p.work_type)}` : ""}</div><p>${esc(p.description)}</p>
       <div class="small"><b>When:</b> ${esc(p.occurred_at)} · <b>Where:</b> ${esc(p.location)}</div>
       ${p.people.map((x) => `<div class="small">• ${esc(x.name)}: ${esc(x.injury)} (${esc(x.treatment)})</div>`).join("")}
       ${p.immediate_actions ? `<div class="small"><b>Actions:</b> ${esc(p.immediate_actions)}</div>` : ""}
@@ -355,8 +393,9 @@ VIEWS.record = async (id) => {
     <p class="muted small">Hash ${esc(r.hash.slice(0, 20))}… · received ${esc(r.received_at.replace("T", " ").slice(0, 16))} UTC${r.lat ? ` · GPS ${r.lat.toFixed(4)}, ${r.lng.toFixed(4)}` : ""}</p>
     ${actionBar(`<div class="grid2"><button class="dark" data-act="pdf" data-path="/api/records/${r.id}/pdf">Open PDF</button>
       <button data-act="pdf" data-path="/api/records/${r.id}/pdf?print=1">🖨️ Print copy</button></div>
-      ${r.kind === "incident" ? `<div class="grid2"><button data-act="pdf" data-path="/api/records/${r.id}/annexure1.pdf">Annexure 1</button>
-        <button class="primary" data-act="nav" data-to="investigate/${r.id}">Investigate</button></div>` : ""}`)}`);
+      ${r.kind === "incident" ? `<div class="grid2"><button data-act="pdf" data-path="/api/records/${r.id}/incident/pack.pdf">📄 Incident pack</button>
+        <button class="primary" data-act="nav" data-to="investigate/${r.id}">Investigate</button></div>` : ""}
+      ${r.kind === "investigation" ? `<button data-act="pdf" data-path="/api/records/${r.payload.incident_id}/incident/pack.pdf">📄 Incident pack</button>` : ""}`)}`);
 };
 ACT.back = () => history.back();
 ACT.pdf = (el) => openPdf(el.dataset.path);

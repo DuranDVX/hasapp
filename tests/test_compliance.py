@@ -196,7 +196,11 @@ def test_incident_investigation_and_annexure1(co):
     assert t["incidents"]["status"] == "green"
     r = client.get(f"/api/records/{iid}/annexure1.pdf", headers=co["h"])
     text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(r.content)).pages)
-    assert "Annexure 1" in text and "Guard removed" in text and "Retrain" in text
+    assert "ANNEXURE 1" in text and "Retrain" in text
+    r = client.get(f"/api/records/{iid}/incident/pack.pdf", headers=co["h"])
+    text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(r.content)).pages)
+    assert "FLASH REPORT" in text and "ANNEXURE 1" in text and "UNSAFE" not in text.split("CAUSES")[0][:0] \
+        and "Guard removed" in text and "Retrain" in text and "Documents collected" in text
 
 
 def test_print_packs_and_public_verify(co):

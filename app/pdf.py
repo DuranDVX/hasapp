@@ -703,3 +703,224 @@ def _stamp_pages(writer: PdfWriter) -> None:
         c.drawRightString(w - 15 * mm, 6 * mm, f"{config.APP_NAME} · page {i} of {n}")
         c.save()
         page.merge_page(PdfReader(io.BytesIO(buf.getvalue())).pages[0])
+
+
+# ---------------------------------------------------------------- incident pack (flash report, Annexure 1, investigation form)
+
+BOX = TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#9aa5b1")), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                  ("FONTSIZE", (0, 0), (-1, -1), 8.5), ("LEFTPADDING", (0, 0), (-1, -1), 3), ("RIGHTPADDING", (0, 0), (-1, -1), 3)])
+SECTION = ParagraphStyle("sec", parent=H3, backColor=colors.HexColor("#e9edf2"), borderPadding=3, spaceBefore=8)
+
+
+def _letterhead(company, consultants: list) -> list:
+    left = [_img(company.logo_file, 38 * mm, 16 * mm), _p(company.name, SMALL)] if company.logo_file \
+        else [_p(company.name, H2)]
+    cons = [c for c in (consultants or []) if c.get("name")][:2]
+    blocks = [[_p(c.get("firm") or "H&S consultant", SMALL), _p(c["name"], P), _p(c.get("reg") or "", SMALL),
+               _p(" · ".join(x for x in (c.get("phone"), c.get("email")) if x), SMALL)] for c in cons]
+    cells = [left] + blocks + [""] * (2 - len(blocks))
+    t = Table([cells], colWidths=[W * 0.34, W * 0.33, W * 0.33])
+    t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP"), ("LINEBELOW", (0, 0), (-1, 0), 1.2, colors.HexColor("#122433"))]))
+    return [t, Spacer(1, 6)]
+
+
+def _kv(rows: list, w1=55) -> Table:
+    t = Table([[_p(a), _p(b if b not in (None, "") else "-")] for a, b in rows], colWidths=[w1 * mm, W - w1 * mm])
+    t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#c8ced6")), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                           ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f4f6f8"))]))
+    return t
+
+
+def _yn(v) -> str:
+    return "-" if v is None else ("Yes" if v else "No")
+
+
+def _checklist(items: list, chosen: list, cols: int = 3) -> Table:
+    """Boxes with an X for the chosen items, like the paper form."""
+    cells = []
+    for it in items:
+        mark = it in (chosen or [])
+        cells.append([_raw("<b>X</b>", ParagraphStyle("x", parent=P, alignment=1)) if mark else "", _p(it, SMALL)])
+    rows = []
+    for i in range(0, len(cells), cols):
+        chunk = cells[i:i + cols] + [["", ""]] * (cols - len(cells[i:i + cols]))
+        rows.append([x for pair in chunk for x in pair])
+    cw = W / cols
+    t = Table(rows, colWidths=[7 * mm, cw - 7 * mm] * cols)
+    st = [("VALIGN", (0, 0), (-1, -1), "MIDDLE"), ("FONTSIZE", (0, 0), (-1, -1), 8)]
+    for c in range(cols):
+        st.append(("BOX", (2 * c, 0), (2 * c, -1), 0.6, colors.HexColor("#5d6c7b")))
+        st.append(("INNERGRID", (2 * c, 0), (2 * c, -1), 0.6, colors.HexColor("#5d6c7b")))
+    t.setStyle(TableStyle(st))
+    return t
+
+
+def _bullets(text_or_list) -> list:
+    items = text_or_list if isinstance(text_or_list, list) else [x.strip(" •-") for x in str(text_or_list or "").splitlines()]
+    return [_p("• " + x) for x in items if x]
+
+
+def _sig_line(rec, role_hint: str = "") -> list:
+    if not rec or not rec.signatures:
+        return [_p("Signature: ______________________   Date: __________", P)]
+    g = next((g for g in rec.signatures if role_hint and g.role == role_hint), rec.signatures[0])
+    t = Table([[_p(f"{g.name} ({g.role})", P), _img(g.image_file, 40 * mm, 12 * mm), _p(g.signed_at[:16].replace("T", " "), SMALL)]],
+              colWidths=[70 * mm, 50 * mm, W - 120 * mm])
+    t.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
+    return [t]
+
+
+def flash_report_flow(company, site, inc, inv, close, consultants) -> list:
+    p = inc.payload
+    q = inv.payload if inv else {}
+    when = p.get("occurred_at") or str(inc.record_date)
+    date_s, _, time_s = when.partition(" ")
+    out = _letterhead(company, consultants) + [
+        _p("ACCIDENT / INCIDENT FLASH REPORT", ParagraphStyle("t", parent=H1, alignment=1)),
+        _p("Prompt reporting means incidents are investigated thoroughly, so they do not happen again and workers stay protected.", SMALL),
+        _p("1. Basic information", SECTION),
+        _kv([("Project / site name", site.name), ("Date of incident", date_s), ("Time of incident", time_s or "-"),
+             ("Location", p.get("location") or site.address), ("Reported by", p.get("reported_by") or inc.created_name),
+             ("Contact number", p.get("reporter_contact"))]),
+        _p("2A. Incident details", SECTION),
+        _kv([("Type of incident", (p.get("title") or "") + f" ({library.INCIDENT_TYPES.get(p.get('type'), '')})")])]
+    for x in p.get("people") or [{}]:
+        m = x.get("medical") or {}
+        out += [Spacer(1, 3), _kv([("Injured / affected person", x.get("name")), ("ID number", x.get("id_number")),
+                                   ("Occupation", x.get("occupation")), ("Injury description", x.get("injury")),
+                                   ("Immediate medical action", x.get("treatment"))]),
+                _p("2B. Medical report findings", SECTION),
+                _kv([("Clinic / hospital description", m.get("clinic")), ("Pre-existing defect or disease", m.get("pre_existing")),
+                     ("Referred for physiotherapy", _yn(m.get("physio"))), ("Unfit for work", _yn(m.get("unfit"))),
+                     ("Possible date fit for light duty", m.get("light_duty_date")), ("Date of resumption", m.get("resumption_date"))])]
+    out += [_p("3. Incident description", SECTION)] + [_p(par) for par in (p.get("description") or "").split("\n\n") if par.strip()]
+    out += [_p("4. Immediate actions taken", SECTION)] + (_bullets(p.get("immediate_actions")) or [_p("-")])
+    out += [_p("5. Corrective action", SECTION)]
+    out += [_p(f"• {a['action']}" + (f" ({a['owner']}" + (f", by {a['due']}" if a.get('due') else "") + ")" if a.get("owner") else ""))
+            for a in q.get("actions", [])] or [_p("Investigation pending.", WARN)]
+    out += [_p("6. Close-out requirements", SECTION), _p(q.get("close_out") or "To be set by the investigation.")]
+    if close:
+        out.append(_p(f"Closed out on {close.record_date}: " + str(next((f['value'] for f in close.payload.get('fields', []) if f['k'] == 'notes'), "")), P))
+    out += [_p("Prepared by", SECTION),
+            _kv([("Name", q.get("investigator") or inc.created_name), ("Position", q.get("designation") or "Incident investigator (GAR 9(2))"),
+                 ("Date", str(inv.record_date) if inv else str(inc.record_date))])]
+    docs = ["Annexure 1", "Incident report and investigation"]
+    return out, docs
+
+
+def annexure1_flow(company, site, inc, inv, person: dict, employer_sig_rec=None) -> list:
+    p, q = inc.payload, (inv.payload if inv else {})
+    hdr = ParagraphStyle("ah", parent=H2, alignment=1, spaceAfter=0)
+    out = [_p("RECORDING AND INVESTIGATION OF INCIDENTS – ANNEXURE 1", hdr),
+           _p("OCCUPATIONAL HEALTH AND SAFETY ACT NO 85 OF 1993 · GENERAL ADMINISTRATIVE REGULATIONS",
+              ParagraphStyle("as", parent=SMALL, alignment=1)),
+           _p("A. RECORDING OF INCIDENT", SECTION)]
+    when = p.get("occurred_at") or str(inc.record_date)
+    d, _, t = when.partition(" ")
+    m = person.get("medical") or {}
+    out += [_kv([("1. Name of employer", company.name), ("2. Name of affected person", person.get("name")),
+                 ("3. Date of incident", d), ("4. Time of incident", t or "-"),
+                 ("Date of resumption", m.get("resumption_date") or m.get("light_duty_date"))], 60),
+            _p("5. Part of body affected", H3), _checklist(library.BODY_PARTS, person.get("body_parts"), 5),
+            _p("6. Effect on person", H3), _checklist(library.EFFECTS, person.get("effects"), 4)]
+    if person.get("effect_other"):
+        out.append(_p(f"Other (specify): {person['effect_other']}", P))
+    out += [_p("7. Expected period of disablement", H3),
+            _checklist(library.DISABLEMENT, [person.get("disablement")], 3),
+            _kv([("8. Description of occupational disease", "-"),
+                 ("9. Machine / process involved / type of work performed / exposure", p.get("work_type")),
+                 ("10. Reported to the Compensation Commissioner?",
+                  f"Yes, {q['reported_cf']['date']} (ref {q['reported_cf'].get('ref') or '-'})" if q.get("reported_cf", {}).get("date") else "No"),
+                 ("11. Reported to the Provincial Director?",
+                  f"Yes, {q['reported_dol']['date']} (ref {q['reported_dol'].get('ref') or '-'})" if q.get("reported_dol", {}).get("date") else "No")], 75),
+            _p("B. INVESTIGATION OF THE ABOVE INCIDENT BY A PERSON DESIGNATED THERETO", SECTION)]
+    if inv:
+        out += [_kv([("1. Name of investigator", q.get("investigator") or (inv.signatures[0].name if inv.signatures else "")),
+                     ("2. Date of investigation", str(inv.record_date)),
+                     ("3. Designation of investigator", q.get("designation") or "GAR 9(2)"),
+                     ("4. Short description of incident", q.get("short_description") or p.get("title")),
+                     ("5. Suspected cause of incident", q.get("suspected_cause") or "; ".join(q.get("root_causes", []))),
+                     ("6. Recommended steps to prevent a recurrence", "; ".join(a["action"] for a in q.get("actions", [])))], 60)]
+        out += _sig_line(inv, "investigator")
+        out += [_p("C. ACTION TAKEN BY EMPLOYER TO PREVENT THE RECURRENCE OF A SIMILAR INCIDENT", SECTION),
+                _p(q.get("employer_action") or "-")] + _sig_line(employer_sig_rec or inv)
+        out += [_p("D. REMARKS BY HEALTH AND SAFETY COMMITTEE", SECTION), _p(q.get("committee_remarks") or "-"),
+                _p("Signature: ______________________   Date: __________", P)]
+    else:
+        out.append(_p("Not yet investigated. GAR 9 requires an investigation within 7 days.", BAD))
+    return out
+
+
+def investigation_form_flow(company, site, inc, inv) -> list:
+    p, q = inc.payload, (inv.payload if inv else {})
+    people = p.get("people") or []
+    out = [_p("INCIDENT / ACCIDENT REPORT AND INVESTIGATION", ParagraphStyle("it", parent=H2, alignment=1)),
+           _p("REPORTING", SECTION),
+           _kv([("Name", p.get("reported_by") or inc.created_name), ("Site", site.name),
+                ("Day, date and time of incident", p.get("occurred_at") or str(inc.record_date)),
+                ("Day, date and time of reporting", inc.device_time[:16].replace("T", " ") or str(inc.received_at)[:16])]),
+           _p("DAMAGE / INJURY", SECTION), _checklist(library.DAMAGE, p.get("damage"), 3),
+           _p("Description of damage / injury: " + ("; ".join(f"{x.get('name')}: {x.get('injury')}" for x in people) or p.get("damage_note") or "-"), P),
+           _p("General agencies", H3), _checklist(library.AGENCIES_GENERAL, q.get("agencies_general"), 4),
+           _p("Occupational hygiene agencies", H3), _checklist(library.AGENCIES_HYGIENE, q.get("agencies_hygiene"), 4),
+           _p(f"Was this the person's normal work? {_yn(q.get('normal_work'))}", P),
+           _p("CAUSES (IMMEDIATE AND BASIC)", SECTION),
+           _p("Unsafe acts", H3), _checklist(library.UNSAFE_ACTS, q.get("unsafe_acts"), 2),
+           _p("Unsafe conditions", H3), _checklist(library.UNSAFE_CONDITIONS, q.get("unsafe_conditions"), 2),
+           _p("Personal factors", H3), _checklist(library.PERSONAL_FACTORS, q.get("personal_factors"), 3),
+           _p("Job factors", H3), _checklist(library.JOB_FACTORS, q.get("job_factors"), 2),
+           _p("CONTROL STEPS TO PREVENT A RECURRENCE", SECTION),
+           _p("Personal factors", H3), _checklist(library.CONTROL_PERSONAL, q.get("control_personal"), 2),
+           _p("Job factors", H3), _checklist(library.CONTROL_JOB, q.get("control_job"), 3)]
+    if q.get("findings"):
+        out += [_p("Investigation findings", H3), _p(q["findings"])]
+    out += [Spacer(1, 6), _p("Signature of incident / accident investigator", H3)] + _sig_line(inv, "investigator")
+    return out
+
+
+def incident_pack(company, site, inc, inv, close, consultants, id_files: list, include: tuple = ("flash", "annexure", "form", "id", "photos")) -> bytes:
+    """One PDF: flash report, Annexure 1 per person, investigation form, ID copies, photos with captions."""
+    flow, docs = flash_report_flow(company, site, inc, inv, close, consultants)
+    p = inc.payload
+    photos = [(ph, (p.get("photo_captions") or [""] * 20)[i] if i < len(p.get("photo_captions") or []) else "")
+              for i, ph in enumerate(p.get("photos") or []) if _file_of(ph)]
+    if id_files and "id" in include:
+        docs.append("Injured person's ID documentation")
+    if photos and "photos" in include:
+        docs.append(f"Photographs ({len(photos)})")
+    flow += [_p("Documents collected", SECTION)] + [_p("• " + d) for d in docs] + _proof(inc)
+    parts = []
+    if "flash" in include:
+        parts.append(flow)
+    if "annexure" in include:
+        for person in (p.get("people") or [{}]):
+            parts.append(_letterhead(company, consultants) + annexure1_flow(company, site, inc, inv, person))
+    if "form" in include:
+        parts.append(_letterhead(company, consultants) + investigation_form_flow(company, site, inc, inv))
+    if "photos" in include and photos:
+        ph_flow = _letterhead(company, consultants) + [_p("Photographs", H1)]
+        for ph, cap in photos:
+            ph_flow += [KeepTogether([_p(cap or "Photo", H3), _img(_file_of(ph), W, 105 * mm), Spacer(1, 6)])]
+        parts.append(ph_flow)
+    buf = io.BytesIO()
+    doc, frame = _doc(buf, "Incident report", company, site)
+    story = []
+    for i, part in enumerate(parts):
+        if i:
+            story.append(PageBreak())
+        story += part
+    doc.build(story, onFirstPage=frame, onLaterPages=frame)
+    out = PdfWriter()
+    for page in PdfReader(io.BytesIO(buf.getvalue())).pages:
+        out.add_page(page)
+    if "id" in include:   # ID copies go after the forms, as in the consultant's pack
+        for name in id_files:
+            try:
+                data = files.read(name) if name.endswith(".pdf") else _image_page(name)
+                for page in PdfReader(io.BytesIO(data)).pages:
+                    out.add_page(page)
+            except Exception:
+                continue
+    res = io.BytesIO()
+    out.write(res)
+    return res.getvalue()

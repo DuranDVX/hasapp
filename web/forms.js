@@ -48,11 +48,11 @@ ACT.mic = async (btn) => {
     btn.classList.add("rec");
   } catch { toast("The app needs the microphone. Allow it in the browser settings.", "bad"); }
 };
-async function voiceToAI(path, blob, text, onDone, onOffline) {
+async function voiceToAI(path, blob, text, onDone, onOffline, extra = { site_id: S.siteId }) {
   if (!online()) return onOffline(blob ? await blobToDataURL(blob) : "");
   render(`<div class="spinner"></div><p class="center">Listening and writing it up…</p>`);
   const fd = new FormData();
-  fd.append("site_id", S.siteId);
+  Object.entries(extra).forEach(([k, v]) => fd.append(k, v));
   if (blob) fd.append("audio", blob, "note." + (blob.type.includes("mp4") ? "m4a" : blob.type.includes("ogg") ? "ogg" : "webm"));
   if (text) fd.append("text", text);
   try { onDone(await api(path, { body: fd, timeout: 120000 })); }
@@ -379,52 +379,92 @@ VIEWS.incident = async () => {
   if (!can.write()) return render(`<div class="note warn">Your role cannot report incidents. Tell the foreman.</div>`);
   const d = await IDB.get(draftKey("incident"));
   if (d) return incidentForm(d);
-  render(`<h1>Report an incident</h1>
-    <div class="note bad small">If someone is badly hurt: first aid and call for help first. Report after.</div>
-    ${micBlock("Say what happened, when, where, who was hurt, and what you did.")}
-    <button data-act="inc-manual">Fill in the form by hand</button>`);
-  micHandler = (blob) => voiceToAI("/api/ai/incident", blob, "", async (r) => {
-    const x = r.draft;
-    const nd = { client_id: newId(), transcript: r.transcript, audio: r.audio || "", type: x.type, occurred_at: x.occurred_at, location: x.location,
-      description: x.description, people: x.people, witnesses: x.witnesses.join(", "), immediate_actions: x.immediate_actions,
-      possible_causes: x.possible_causes, possibly_reportable: x.possibly_reportable, reportable_reason: x.reportable_reason, questions: x.questions, photos: [] };
-    await saveDraft("incident", nd); incidentForm(nd);
-  }, async (audio) => { const nd = blankIncident(); nd.audio = audio; await saveDraft("incident", nd); incidentForm(nd); });
+  render(`${head("Report an incident", "Speak or type what happened. The app writes the flash report and Annexure 1 for you to check.", "incidents")}
+    <div class="note bad small">If someone is hurt: first aid and call for help first. Report after.</div>
+    ${micBlock("Say: who you are, when and where, what work was being done, what happened, who was hurt and how, what you did straight away, and where the person was taken.")}
+    <details class="card"><summary>Type it instead</summary><textarea id="inc-text" style="min-height:140px"></textarea>
+      <button class="dark" data-act="inc-text">Use this text</button></details>
+    <button class="link" data-act="inc-manual">Fill in the form by hand</button>`);
+  micHandler = (blob) => incidentFromAI(blob, "");
 };
-const blankIncident = () => ({ client_id: newId(), transcript: "", audio: "", type: "near_miss", occurred_at: localISO().slice(0, 16).replace("T", " "),
-  location: "", description: "", people: [], witnesses: "", immediate_actions: "", possible_causes: [], possibly_reportable: false, reportable_reason: "", questions: [], photos: [] });
+function incidentFromAI(blob, text) {
+  voiceToAI("/api/ai/incident", blob, text, async (r) => {
+    const x = r.draft;
+    const nd = { ...blankIncident(), ...x, client_id: newId(), transcript: r.transcript, audio: r.audio || "",
+      witnesses: (x.witnesses || []).join(", "), photos: [], photo_captions: [] };
+    await saveDraft("incident", nd); incidentForm(nd);
+  }, async (audio) => { const nd = blankIncident(); nd.audio = audio; nd.description = text; await saveDraft("incident", nd); incidentForm(nd); });
+}
+ACT["inc-text"] = () => { const t = $("#inc-text").value.trim(); if (!t) return toast("Type what happened first.", "bad"); incidentFromAI(null, t); };
+const blankPerson = () => ({ name: "", worker_id: "", injury: "", treatment: "", body_parts: [], effects: [], effect_other: "", disablement: "",
+  medical: { clinic: "", pre_existing: "", physio: null, unfit: null, light_duty_date: "", resumption_date: "" } });
+const blankIncident = () => ({ client_id: newId(), transcript: "", audio: "", type: "near_miss", title: "", occurred_at: localISO().slice(0, 16).replace("T", " "),
+  location: "", reported_by: me().name, reporter_contact: "", work_type: "", description: "", people: [], damage: [], damage_note: "",
+  witnesses: "", immediate_actions: "", possible_causes: [], possibly_reportable: false, reportable_reason: "", questions: [], photos: [], photo_captions: [] });
 ACT["inc-manual"] = async () => { const d = blankIncident(); await saveDraft("incident", d); incidentForm(d); };
+const chipList = (attr, i, all, chosen) => `<div class="chips">${all.map((o) => `<button class="chip ${(chosen || []).includes(o) ? "on" : ""}" data-act="inc-chip" data-attr="${attr}" data-i="${i}" data-v="${esc(o)}">${esc(o)}</button>`).join("")}</div>`;
+const ynBtns = (attr, i, v) => `<div class="answer" style="grid-template-columns:1fr 1fr 1fr">${[["Yes", true], ["No", false], ["Unknown", null]].map(([l, b]) =>
+  `<button class="${b === true ? "ok" : b === false ? "defect" : "na"} ${v === b ? "on" : ""}" data-act="inc-yn" data-attr="${attr}" data-i="${i}" data-v="${b}">${l}</button>`).join("")}</div>`;
 function incidentForm(d) {
-  render(`<div class="row between"><h1>Incident report</h1><button class="link" data-act="inc-reset">Start again</button></div>
-    ${d.questions?.length ? `<div class="note warn"><b>Missing:</b>${d.questions.map((q) => `<div>• ${esc(q)}</div>`).join("")}</div>` : ""}
-    <label>Type</label><select data-if="type">${Object.entries(S.data.incident_types).map(([k, v]) => `<option value="${k}" ${k === d.type ? "selected" : ""}>${v}</option>`).join("")}</select>
-    <label>When</label><input data-if="occurred_at" value="${esc(d.occurred_at)}">
-    <label>Where</label><input data-if="location" value="${esc(d.location)}">
-    <label>What happened</label><textarea data-if="description">${esc(d.description)}</textarea>
-    <label>People hurt or involved</label>
-    ${d.people.map((p, i) => `<div class="card"><input data-ip="name" data-i="${i}" value="${esc(p.name)}" placeholder="Name">
-      <input data-ip="injury" data-i="${i}" value="${esc(p.injury)}" placeholder="Injury"><input data-ip="treatment" data-i="${i}" value="${esc(p.treatment)}" placeholder="Treatment">
-      <button class="link" data-act="inc-person-del" data-i="${i}">Remove</button></div>`).join("")}
+  const L = S.data.incident_lists;
+  render(`<div class="row between"><h1 style="margin:0">Incident report</h1><button class="link" data-act="inc-reset">Start again</button></div>
+    ${d.questions?.length ? `<div class="note warn"><b>Still missing:</b>${d.questions.map((q) => `<div>• ${esc(q)}</div>`).join("")}</div>` : ""}
+    <h2>1. Basic information</h2><div class="card">
+      <label>Type of incident (short)</label><input data-if="title" value="${esc(d.title)}" placeholder="Trench collapse: worker trapped by falling soil">
+      <label>Category</label><select data-if="type">${Object.entries(S.data.incident_types).map(([k, v]) => `<option value="${k}" ${k === d.type ? "selected" : ""}>${v}</option>`).join("")}</select>
+      <div class="grid2"><div><label>Date and time</label><input data-if="occurred_at" value="${esc(d.occurred_at)}"></div>
+        <div><label>Where</label><input data-if="location" value="${esc(d.location)}"></div></div>
+      <div class="grid2"><div><label>Reported by</label><input data-if="reported_by" value="${esc(d.reported_by)}"></div>
+        <div><label>Contact number</label><input data-if="reporter_contact" type="tel" value="${esc(d.reporter_contact)}"></div></div>
+      <label>Machine, process or type of work</label><input data-if="work_type" value="${esc(d.work_type)}"></div>
+    <h2>2. People hurt or involved</h2>
+    ${d.people.map((p, i) => `<div class="card"><div class="row between"><b>Person ${i + 1}</b><button class="link" data-act="inc-person-del" data-i="${i}">Remove</button></div>
+      <label>Worker</label><select data-ip="worker_id" data-i="${i}"><option value="">Not on the worker list</option>${S.data.workers.map((w) => `<option value="${w.id}" ${w.id === p.worker_id ? "selected" : ""}>${esc(w.name)}</option>`).join("")}</select>
+      ${p.worker_id ? "" : `<input data-ip="name" data-i="${i}" value="${esc(p.name)}" placeholder="Full name">`}
+      <label>Injury description</label><input data-ip="injury" data-i="${i}" value="${esc(p.injury)}">
+      <label>Immediate medical action / treatment</label><input data-ip="treatment" data-i="${i}" value="${esc(p.treatment)}">
+      <details><summary class="small"><b>Annexure 1 boxes</b> (part of body, effect, time off)</summary>
+        <label>Part of body affected</label>${chipList("body_parts", i, L.body_parts, p.body_parts)}
+        <label>Effect on person</label>${chipList("effects", i, L.effects, p.effects)}
+        ${(p.effects || []).includes("Other") ? `<input data-ip="effect_other" data-i="${i}" value="${esc(p.effect_other)}" placeholder="Other: specify">` : ""}
+        <label>Expected period of disablement</label><select data-ip="disablement" data-i="${i}"><option value="">-</option>${L.disablement.map((o) => `<option ${o === p.disablement ? "selected" : ""}>${esc(o)}</option>`).join("")}</select></details>
+      <details><summary class="small"><b>Medical report findings</b></summary>
+        <label>Clinic / hospital description</label><input data-im="clinic" data-i="${i}" value="${esc(p.medical?.clinic)}">
+        <label>Pre-existing defect or disease</label><input data-im="pre_existing" data-i="${i}" value="${esc(p.medical?.pre_existing)}">
+        <label>Referred for physiotherapy</label>${ynBtns("physio", i, p.medical?.physio)}
+        <label>Unfit for work</label>${ynBtns("unfit", i, p.medical?.unfit)}
+        <div class="grid2"><div><label>Fit for light duty from</label><input type="date" data-im="light_duty_date" data-i="${i}" value="${esc(p.medical?.light_duty_date)}"></div>
+          <div><label>Back at work on</label><input type="date" data-im="resumption_date" data-i="${i}" value="${esc(p.medical?.resumption_date)}"></div></div></details></div>`).join("")}
     <button class="small" data-act="inc-person">+ Add a person</button>
-    <label>Witnesses</label><input data-if="witnesses" value="${esc(d.witnesses)}">
-    <label>What was done straight away</label><textarea data-if="immediate_actions">${esc(d.immediate_actions)}</textarea>
-    <div class="card"><div class="row between"><b>Photos</b><button class="small" data-act="inc-photo">📷 Add</button></div>
-      <div class="chips">${d.photos.map((p) => `<img class="thumb" src="${p}">`).join("")}</div></div>
-    <div class="card"><label class="row" style="color:var(--ink);font-size:15px"><input type="checkbox" data-if="possibly_reportable" style="width:auto;margin:0" ${d.possibly_reportable ? "checked" : ""}> This may be reportable (serious injury, death, major incident)</label>
+    <h2>3. What happened</h2><div class="card"><textarea data-if="description" style="min-height:180px">${esc(d.description)}</textarea>
+      <label>Damage</label>${chipList("damage", -1, L.damage, d.damage)}
+      <label>Witnesses</label><input data-if="witnesses" value="${esc(d.witnesses)}"></div>
+    <h2>4. Immediate actions taken (one per line)</h2><div class="card"><textarea data-if="immediate_actions" style="min-height:120px">${esc(d.immediate_actions)}</textarea></div>
+    <h2>Photos</h2><div class="card">${d.photos.map((ph, i) => `<div class="row" style="margin-bottom:6px"><img class="thumb" src="${ph}">
+        <input data-cap="${i}" value="${esc(d.photo_captions[i] || "")}" placeholder="Caption, e.g. trench barricaded" style="margin:0"></div>`).join("")}
+      <button class="small" data-act="inc-photo">📷 Add photo</button></div>
+    <div class="card"><label class="check"><input type="checkbox" data-if="possibly_reportable" ${d.possibly_reportable ? "checked" : ""}> This may be reportable (OHS Act s24)</label>
       ${d.possibly_reportable ? `<div class="note bad small">${esc(d.reportable_reason || "")} The safety officer must decide and report it to the Department of Employment and Labour in time.</div>` : ""}</div>
-    <button class="primary" data-act="inc-finish">Sign and save</button>`);
+    ${actionBar(`<button class="primary" data-act="inc-finish">Sign and save</button>`)}`);
   $("#view").oninput = $("#view").onchange = async (e) => {
-    const f = e.target.dataset.if, pf = e.target.dataset.ip;
-    if (f) d[f] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
-    if (pf) d.people[+e.target.dataset.i][pf] = e.target.value;
+    const t = e.target, f = t.dataset.if, pf = t.dataset.ip, mf = t.dataset.im;
+    if (f) d[f] = t.type === "checkbox" ? t.checked : t.value;
+    if (pf) { const p = d.people[+t.dataset.i]; p[pf] = t.value; if (pf === "worker_id") { const w = worker(t.value); if (w) p.name = w.name; } }
+    if (mf) d.people[+t.dataset.i].medical[mf] = t.value;
+    if (t.dataset.cap !== undefined) d.photo_captions[+t.dataset.cap] = t.value;
     await saveDraft("incident", d);
-    if (f === "possibly_reportable") incidentForm(d);
+    if (f === "possibly_reportable" || pf === "worker_id") { const y = scrollY; incidentForm(d); scrollTo(0, y); }
   };
 }
-async function withInc(fn) { const d = await IDB.get(draftKey("incident")); await fn(d); await saveDraft("incident", d); incidentForm(d); }
-ACT["inc-person"] = () => withInc((d) => d.people.push({ name: "", worker_id: "", injury: "", treatment: "" }));
+async function withInc(fn) { const d = await IDB.get(draftKey("incident")); await fn(d); await saveDraft("incident", d); const y = scrollY; incidentForm(d); scrollTo(0, y); }
+ACT["inc-person"] = () => withInc((d) => d.people.push(blankPerson()));
 ACT["inc-person-del"] = (el) => withInc((d) => d.people.splice(+el.dataset.i, 1));
-ACT["inc-photo"] = () => withInc(async (d) => { const p = await pickPhoto(); if (p) d.photos.push(p); });
+ACT["inc-photo"] = () => withInc(async (d) => { const p = await pickPhoto(); if (p) { d.photos.push(p); d.photo_captions.push(""); } });
+ACT["inc-chip"] = (el) => withInc((d) => {
+  const i = +el.dataset.i, a = el.dataset.attr, target = i < 0 ? d : d.people[i];
+  target[a] = target[a] || []; toggle(target[a], el.dataset.v);
+});
+ACT["inc-yn"] = (el) => withInc((d) => { d.people[+el.dataset.i].medical[el.dataset.attr] = el.dataset.v === "null" ? null : el.dataset.v === "true"; });
 ACT["inc-reset"] = async () => { if (confirm("Throw away this report?")) { await dropDraft("incident"); route(); } };
 ACT["inc-finish"] = async (btn) => {
   const d = await IDB.get(draftKey("incident"));
@@ -432,11 +472,13 @@ ACT["inc-finish"] = async (btn) => {
   const sig = await signatureModal({ name: me().name, subtitle: "I report this incident. The facts are true as far as I know.", photo: false });
   if (!sig) return;
   btn.disabled = true;
-  await finishRecord("incident", { type: d.type, occurred_at: d.occurred_at, location: d.location, description: d.description, people: d.people,
-    witnesses: d.witnesses.split(",").map((x) => x.trim()).filter(Boolean), immediate_actions: d.immediate_actions, possible_causes: d.possible_causes,
-    possibly_reportable: d.possibly_reportable, reportable_reason: d.reportable_reason, photos: d.photos },
-    [{ ...sig, user_id: me().id, role: "reporter" }], { client_id: d.client_id, transcript: d.transcript, audio: d.audio, label: "Incident report" });
-  await dropDraft("incident"); go("board");
+  const keys = ["type", "title", "occurred_at", "location", "reported_by", "reporter_contact", "work_type", "description", "people", "damage",
+    "damage_note", "immediate_actions", "possible_causes", "possibly_reportable", "reportable_reason", "photos", "photo_captions"];
+  const payload = Object.fromEntries(keys.map((k) => [k, d[k]]));
+  payload.witnesses = (d.witnesses || "").split(",").map((x) => x.trim()).filter(Boolean);
+  await finishRecord("incident", payload, [{ ...sig, user_id: me().id, role: "reporter" }],
+    { client_id: d.client_id, transcript: d.transcript, audio: d.audio, label: "Incident report" });
+  await dropDraft("incident"); go("incidents");
 };
 
 // ================================================================ induction

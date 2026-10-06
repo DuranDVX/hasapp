@@ -558,3 +558,41 @@ FILE_SECTIONS.append({"key": "registers", "title": "Registers: drills, committee
 UPLOAD_SECTIONS = {s["key"] for s in FILE_SECTIONS if "upload" in s["type"]}
 
 AES_DOCS["spec_acceptance"] = "Acceptance of the client's H&S specification"
+
+
+# ---------------------------------------------------------------- incident forms
+# Annexure 1 (General Administrative Regulations) and the investigation form that
+# SA H&S consultants use (loss-causation checklists).
+INCIDENT_TYPES.update({"disabling": "Disabling injury", "fatal": "Fatality"})
+BODY_PARTS = ["Head/Neck", "Eye", "Trunk", "Finger", "Hand", "Arm", "Foot", "Leg", "Internal", "Multiple"]
+EFFECTS = ["Sprain/Strain", "Contusion/Wound", "Fractures", "Burns", "Amputations", "Electric shock", "Asphyxiation",
+           "Unconsciousness", "Poisoning", "Occupational disease", "Multiple", "Other"]
+DISABLEMENT = ["0-13 days", "2-4 weeks", ">4-16 weeks", ">16-52 weeks", ">52 weeks or permanent disablement", "Killed"]
+DAMAGE = ["Buildings", "Floors", "Machinery", "Equipment", "Vehicles", "Product"]
+AGENCIES_GENERAL = ["Struck by", "Struck against", "Fall", "Falling object", "Handling", "Machine", "Transport", "Electricity"]
+AGENCIES_HYGIENE = ["Chemical", "Fumes", "Fire", "Gas", "Dust", "Noise", "Vapour"]
+UNSAFE_ACTS = ["Operating without authority", "Operating at unsafe speed", "Making safety devices inoperative",
+               "Using unsafe equipment", "Using equipment unsafely", "Unsafe loading, placing or mixing",
+               "Taking an unsafe position", "Working on moving or unsafe equipment", "Distracting, teasing, horseplay",
+               "Failure to use protective equipment", "Safety regulations ignored"]
+UNSAFE_CONDITIONS = ["Inadequately guarded", "Unguarded", "Defective tools, equipment or substance", "Hazardous arrangement",
+                     "Unsafe design or construction", "Poor lighting", "Unsafe clothing", "Poor floor condition",
+                     "Poor ventilation", "Other"]
+PERSONAL_FACTORS = ["Lack of knowledge or skill", "Physical or mental defect", "Improper attitude or motivation"]
+JOB_FACTORS = ["Inadequate work standards", "Unsafe conditions"]
+CONTROL_PERSONAL = ["Attend a training course", "Instruct how to do the job or follow the revised work standard",
+                    "Medical examination (hearing, eyesight, alcohol, drugs, disability)", "Transfer to another job",
+                    "Attend safety committee meetings", "Enforce / warn"]
+CONTROL_JOB = ["Write a work standard", "Revise the work standard", "Guard", "Repair", "Modify", "Lockout",
+               "Housekeeping", "Remove", "Provide protection"]
+CREDENTIAL_KINDS["id_document"] = "ID document copy"
+
+FORMS["incident_close"] = {
+    "title": "Incident closed out", "reg": "GAR 9, investigation close-out", "icon": "✅",
+    "purpose": "Confirm the corrective actions are in place and work may restart.",
+    "fields": [
+        {"k": "incident", "label": "Incident", "type": "open_incident", "req": True},
+        {"k": "actions_done", "label": "All corrective actions are implemented", "type": "yesno", "req": True},
+        {"k": "safe", "label": "A competent person confirmed the area and work are safe", "type": "yesno", "req": True},
+        {"k": "notes", "label": "What was done", "type": "textarea", "req": True}],
+    "signers": [{"role": "competent person", "who": "me", "label": "Competent person"}]}

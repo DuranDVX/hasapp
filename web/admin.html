@@ -52,6 +52,9 @@ async function load() {
   $("#view").innerHTML = `<div class="page-head"><h1>Admin</h1><p>Every company and login on SiteBakkie. Temporary passwords show once; give them to the person.</p></div>
     <div class="stats">${[["Companies", t.companies], ["Logins", t.users], ["Sites", t.sites], ["Workers", t.workers], ["Records", t.records], ["Records, 7 days", t.records_7d]]
       .map(([l, v]) => `<div class="card"><b>${v}</b><span class="muted small">${l}</span></div>`).join("")}</div>
+    ${D.resets.filter((r) => !r.used && !r.emailed).length ? `<h2>Password help</h2><div class="card"><p class="small muted">These people asked for a new password and email is not set up. Make a new password and send it to them.</p>
+      <table class="users">${D.resets.filter((r) => !r.used && !r.emailed).map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${fmt(r.at)}</td>
+        <td><button class="small" data-reset="${r.user_id}">New password</button><div data-out="${r.user_id}"></div></td></tr>`).join("")}</table></div>` : ""}
     <h2>Invite codes</h2>
     <div class="card"><table class="users"><tr><th>Code</th><th>For</th><th>Sign-ups</th><th>Status</th><th></th></tr>
       ${D.invites.map((i) => `<tr class="${i.active ? "" : "off"}"><td><b>${esc(i.code)}</b></td><td>${esc(i.label)}</td><td>${i.uses}</td>
@@ -83,7 +86,7 @@ document.addEventListener("click", async (e) => {
     if (b.dataset.reset) {
       if (!confirm("Make a new temporary password? The person's other devices are logged out.")) return;
       const r = await api(`/api/admin/users/${b.dataset.reset}`, { method: "PUT", json: { reset_password: true } });
-      document.querySelector(`[data-out="${b.dataset.reset}"]`).innerHTML = `<div class="small" style="margin-top:4px">New password: <span class="pw">${esc(r.temp_password)}</span></div>`;
+      document.querySelectorAll(`[data-out="${b.dataset.reset}"]`).forEach((el) => el.innerHTML = `<div class="small" style="margin-top:4px">New password: <span class="pw">${esc(r.temp_password)}</span></div>`);
     } else if (b.dataset.user) {
       await api(`/api/admin/users/${b.dataset.user}`, { method: "PUT", json: { active: b.dataset.on === "1" } }); load();
     } else if (b.dataset.co) {

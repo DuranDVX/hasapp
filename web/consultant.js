@@ -4,7 +4,7 @@
 // ---------------------------------------------------------------- generic form
 
 const FORM_STATE = {};
-VIEWS.form = async (kind) => {
+VIEWS.form = async (kind, pre) => {
   const F = S.data.forms[kind];
   if (!F) return render(`<div class="note bad">Unknown form.</div>`);
   if (!can.write()) return render(`<div class="note warn">Your role cannot fill in this form.</div>`);
@@ -17,6 +17,12 @@ VIEWS.form = async (kind) => {
       for (const r of c) { try { const full = await api("/api/records/" + r.id); const f = full.payload.fields.find((x) => x.k === "permit"); if (f?.value?.id) closed.add(f.value.id); } catch {} }
       permits = p.filter((r) => !closed.has(r.id));
     } catch {}
+  }
+  let incidents = [];
+  const incField = F.fields.find((f) => f.type === "open_incident");
+  if (incField && online()) {
+    try { incidents = (await api("/api/incidents?site_id=" + S.siteId)).filter((r) => !r.closed_id); } catch {}
+    if (pre && incidents.some((r) => r.id === pre)) v[incField.k] = pre;
   }
   const needsPick = F.signers.some((g) => g.who === "pick");
   const field = (f) => {
@@ -33,6 +39,8 @@ VIEWS.form = async (kind) => {
       case "worker": return L + `<select data-fk="${f.k}"><option value="">Choose…</option>${S.data.workers.map((w) => `<option value="${w.id}" ${val === w.id ? "selected" : ""}>${esc(w.name)} · ${esc(w.trade || "")}</option>`).join("")}</select>`;
       case "open_permit": return L + (permits.length ? `<select data-fk="${f.k}"><option value="">Choose…</option>${permits.map((r) => `<option value="${r.id}" ${val === r.id ? "selected" : ""}>${esc(r.record_date)} · ${esc(r.summary)}</option>`).join("")}</select>`
         : `<div class="note info small">${online() ? "No open permits." : "Open permits load with a signal."}</div>`);
+      case "open_incident": return L + (incidents.length ? `<select data-fk="${f.k}"><option value="">Choose…</option>${incidents.map((r) => `<option value="${r.id}" ${val === r.id ? "selected" : ""}>${esc(r.record_date)} · ${esc(r.title || r.summary)}${r.investigation_id ? "" : " (not investigated yet)"}</option>`).join("")}</select>`
+        : `<div class="note info small">${online() ? "No open incidents." : "Open incidents load with a signal."}</div>`);
       case "ra_role": return L + `<select data-fk="${f.k}"><option value="">Choose…</option>${(S.data.ra_roles || []).map((r) => `<option ${val === r ? "selected" : ""}>${esc(r)}</option>`).join("")}</select>
         ${(S.data.ra_roles || []).length ? "" : `<div class="note info small">Load the consultant's risk assessment first (More → Client documents).</div>`}`;
       case "fixed": return L + `<div class="card small">${esc(f.value)}</div>`;

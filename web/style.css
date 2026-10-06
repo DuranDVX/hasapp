@@ -163,3 +163,9 @@ table.simple td { padding: 7px 4px; border-bottom: 1px solid var(--line); vertic
 .qrgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
 .qrgrid .card { text-align: center; break-inside: avoid; }
 .qrgrid img { width: 150px; height: 150px; }
+
+/* password field with a show/hide button */
+.pw-wrap { position: relative; }
+.pw-wrap input { padding-right: 70px; }
+.pw-eye { position: absolute; right: 6px; top: calc(50% - 4px); transform: translateY(-50%); margin: 0; padding: 6px 10px; min-height: 0;
+  background: transparent; border: 0; color: var(--muted); font-size: 14px; font-weight: 600; width: auto; }
