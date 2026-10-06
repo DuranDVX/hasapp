@@ -11,6 +11,8 @@ os.environ["HAS_DATA"] = TMP
 os.environ["DATABASE_URL"] = f"sqlite:///{TMP}/test.db"
 os.environ["HAS_WARM_STT"] = "0"
 os.environ["CRON_TOKEN"] = "cron-test"
+os.environ["HAS_SIGNUP_CODE"] = ""
+os.environ["ANTHROPIC_API_KEY"] = ""
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 import pytest  # noqa: E402
@@ -261,3 +263,16 @@ def test_ai_task_sheet_drops_invented_ids(co, monkeypatch):
 def test_cron_expiry_requires_token():
     assert client.post("/api/cron/expiry").status_code == 403
     assert client.post("/api/cron/expiry", headers={"X-Cron-Token": "cron-test"}).status_code == 200
+
+
+def test_invite_code_when_set(monkeypatch):
+    monkeypatch.setattr(server, "SIGNUP_CODE", "pilot")
+    body = {"company": "X", "name": "Y", "email": f"{uuid.uuid4().hex[:8]}@test.co", "password": "longenough"}
+    assert client.post("/api/signup", json=body).status_code == 403
+    assert client.post("/api/signup", json=body | {"invite": "pilot"}).status_code == 200
+
+
+def test_sync_lists_todays_risk_ids(co):
+    client.post("/api/records", json=task_sheet(co) | {"record_date": server.today().isoformat()}, headers=co["h"])
+    d = client.get(f"/api/sync?site_id={co['site']['id']}", headers=co["h"]).json()
+    assert co["risks"][0]["id"] in d["today_risk_ids"]

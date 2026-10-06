@@ -1,0 +1,14 @@
+{
+  "name": "SiteSafe",
+  "short_name": "SiteSafe",
+  "description": "Construction site health and safety: task sheets, toolbox talks, checks and the safety file.",
+  "start_url": "/app.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#10202e",
+  "theme_color": "#10202e",
+  "icons": [
+    { "src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
+    { "src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}

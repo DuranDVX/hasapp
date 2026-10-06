@@ -33,6 +33,11 @@ def _p(text, style=P):
     return Paragraph(escape(str(text or "")).replace("\n", "<br/>"), style)
 
 
+def _raw(html, style=P):
+    """A paragraph with trusted markup (callers escape the data parts)."""
+    return Paragraph(html, style)
+
+
 def _img(name: str, w: float, h: float):
     if not name:
         return ""
@@ -49,13 +54,14 @@ def _file_of(v) -> str:
     return v.get("file", "") if isinstance(v, dict) else ""
 
 
-def _doc(buf, title: str, company, site):
+def _doc(buf, title: str, company, site, numbered: bool = True):
     def frame(c, d):
         c.saveState()
         c.setFont("Helvetica", 7.5)
         c.setFillColor(colors.HexColor("#666666"))
         c.drawString(15 * mm, 10 * mm, f"{company.name} · {site.name if site else ''} · {title}")
-        c.drawRightString(A4[0] - 15 * mm, 10 * mm, f"{config.APP_NAME} · page {d.page}")
+        if numbered:
+            c.drawRightString(A4[0] - 15 * mm, 10 * mm, f"{config.APP_NAME} · page {d.page}")
         c.restoreState()
     doc = SimpleDocTemplate(buf, pagesize=A4, leftMargin=15 * mm, rightMargin=15 * mm,
                             topMargin=14 * mm, bottomMargin=16 * mm, title=title,
@@ -96,8 +102,9 @@ def _task_sheet(rec) -> list:
         out.append(_p(f"Task {i}: {t['description']}" + (f" — {t['location']}" if t.get("location") else ""), H3))
         if not t.get("assessed"):
             out.append(_p("Not covered by an approved risk assessment. The safety officer must review this task.", WARN))
-        rows = [["Hazard", "Risk", "Controls"]]
+        rows, spans = [["Hazard", "Risk", "Controls"]], []
         for r in t.get("risks", []):
+            spans.append(len(rows))
             rows.append([_p(r["activity"] + ("" if r.get("approved") else " (NOT APPROVED)"), H3), "", ""])
             for h in r.get("hazards", []):
                 rows.append([_p(h["hazard"]), _p(h.get("risk", "")),
@@ -105,11 +112,13 @@ def _task_sheet(rec) -> list:
         if len(rows) > 1:
             tb = Table(rows, colWidths=[55 * mm, 12 * mm, W - 67 * mm], repeatRows=1)
             tb.setStyle(GRID)
+            tb.setStyle(TableStyle([c for i in spans for c in (
+                ("SPAN", (0, i), (-1, i)), ("BACKGROUND", (0, i), (-1, i), colors.HexColor("#f6f8fa")))]))
             out.append(tb)
-        out.append(_p("<b>PPE:</b> " + escape(", ".join(t.get("ppe", [])) or "-"), P))
-        out.append(_p("<b>Workers:</b> " + escape(", ".join(w["name"] for w in t.get("workers", [])) or "-"), P))
+        out.append(_raw("<b>PPE:</b> " + escape(", ".join(t.get("ppe", [])) or "-")))
+        out.append(_raw("<b>Workers:</b> " + escape(", ".join(w["name"] for w in t.get("workers", [])) or "-")))
         if t.get("plant"):
-            out.append(_p("<b>Plant:</b> " + escape(", ".join(x["name"] for x in t["plant"])), P))
+            out.append(_raw("<b>Plant:</b> " + escape(", ".join(x["name"] for x in t["plant"]))))
     if p.get("unmatched"):
         out.append(_p("Tasks without a risk assessment", H3))
         for u in p["unmatched"]:
@@ -207,7 +216,7 @@ def record_pdf(rec, company, site) -> bytes:
 
 def _section_pdf(company, site, title: str, flow: list) -> bytes:
     buf = io.BytesIO()
-    doc, frame = _doc(buf, "Health and safety file", company, site)
+    doc, frame = _doc(buf, "Health and safety file", company, site, numbered=False)
     doc.build([_p(title, H1), Spacer(1, 4)] + (flow or [_p("No records in this period.", SMALL)]),
               onFirstPage=frame, onLaterPages=frame)
     return buf.getvalue()
@@ -270,15 +279,17 @@ def safety_file(company, site, *, date_from: date, date_to: date, docs: list, wo
     parts: list[bytes] = []
     # Cover and index
     cover = io.BytesIO()
-    doc, frame = _doc(cover, "Health and safety file", company, site)
+    doc, frame = _doc(cover, "Health and safety file", company, site, numbered=False)
     idx = [["#", "Section", "Contents"]]
     for i, sec in enumerate(library.FILE_SECTIONS, 1):
         n_docs = len(docs_by.get(sec["key"], []))
         a = auto.get(sec["key"])
         n_rec = len(by_kind.get(a, [])) if isinstance(a, str) else None
         what = []
-        if "upload" in sec["type"]:
-            what.append(f"{n_docs} document{'s' * (n_docs != 1)}" if n_docs else "MISSING")
+        if n_docs:
+            what.append(f"{n_docs} document{'s' * (n_docs != 1)}")
+        elif sec["type"] == "upload":
+            what.append("MISSING")
         if n_rec is not None:
             what.append(f"{n_rec} record{'s' * (n_rec != 1)}")
         elif sec["key"] == "workers":
@@ -334,6 +345,22 @@ def safety_file(company, site, *, date_from: date, date_to: date, docs: list, wo
                 out.add_page(page)
         except Exception:
             continue
+    _stamp_pages(out)
     buf = io.BytesIO()
     out.write(buf)
     return buf.getvalue()
+
+
+def _stamp_pages(writer: PdfWriter) -> None:
+    """Number every page of the merged file: 'page 3 of 41'."""
+    from reportlab.pdfgen import canvas
+    n = len(writer.pages)
+    for i, page in enumerate(writer.pages, 1):
+        w, h = float(page.mediabox.width), float(page.mediabox.height)
+        buf = io.BytesIO()
+        c = canvas.Canvas(buf, pagesize=(w, h))
+        c.setFont("Helvetica", 7.5)
+        c.setFillColor(colors.HexColor("#666666"))
+        c.drawRightString(w - 15 * mm, 6 * mm, f"{config.APP_NAME} · page {i} of {n}")
+        c.save()
+        page.merge_page(PdfReader(io.BytesIO(buf.getvalue())).pages[0])

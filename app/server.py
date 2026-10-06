@@ -754,11 +754,16 @@ def sync(site_id: str, ctx: Ctx = Depends(current)):
         recent = s.scalars(select(db.Record).where(db.Record.site_id == site.id, db.Record.record_date >= since)
                            .options(selectinload(db.Record.signatures))
                            .order_by(db.Record.record_date.desc(), db.Record.seq.desc()))
+        recent = list(recent)
+        today_risks = sorted({rid for r in recent if r.kind == "task_sheet" and r.record_date == today()
+                              for t in r.payload.get("tasks", []) for rid in (x["id"] for x in t.get("risks", []))})
         return {"site": site_d(site), "workers": workers, "risks": [risk_d(r) for r in risks],
+                "today_risk_ids": today_risks,
                 "plant": [plant_d(p) for p in plant], "users": [{"id": u.id, "name": u.name, "role": u.role} for u in users],
                 "checklists": library.CHECKLISTS, "languages": library.LANGUAGES,
                 "tts_languages": [l for l in library.TTS_VOICES if tts.enabled(l)],
                 "incident_types": library.INCIDENT_TYPES, "credential_kinds": library.CREDENTIAL_KINDS,
+                "file_sections": library.FILE_SECTIONS,
                 "induction_text": ctx.company.induction_text or library.DEFAULT_INDUCTION,
                 "recent": [records.to_dict(r, full=False) for r in recent],
                 "today": today().isoformat(), "synced_at": db.utcnow().isoformat() + "Z"}
