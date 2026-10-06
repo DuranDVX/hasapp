@@ -210,33 +210,47 @@
 
   <section id="pricing" class="band">
     <div class="wrap">
-      <span class="pill draft-pill">Draft pricing · pilot · may change before launch</span>
-      <h2 style="margin-top:14px">Pay per site, only while it's open</h2>
-      <p class="sub">You pay for the sites you run, and the price drops as you add more. When a site closes, billing stops and its records stay in your archive at no charge. Every plan includes every feature.</p>
+      <span class="pill draft-pill">Draft pricing · pilot</span>
+      <h2 style="margin-top:14px">Pay per site. Save from the first month.</h2>
+      <p class="sub">You pay only for the sites that are open. When a site closes, you stop paying, and its records stay in the app for free.</p>
+
+      <div class="save-card">
+        <div class="save-compare">
+          <div class="old"><span>Paper safety file from a consultant</span><b>± R2,500</b><small>per site, per month</small></div>
+          <div class="vs">vs</div>
+          <div class="new"><span>SiteBakkie</span><b>R850</b><small>per site, per month</small></div>
+        </div>
+        <div class="save-line">You save about <b>R1,650 per site, every month</b>. That is two thirds less.</div>
+        <div class="calc">
+          <div class="calc-in"><label for="calc-n">How many sites do you run?</label>
+            <div class="stepper"><button type="button" data-step="-1" aria-label="Fewer sites">−</button>
+              <input id="calc-n" type="number" inputmode="numeric" min="1" max="60" value="5">
+              <button type="button" data-step="1" aria-label="More sites">+</button></div></div>
+          <div class="calc-out">
+            <div><span>Paper files</span><b id="c-paper" class="strike">R12,500</b><small>a month</small></div>
+            <div><span>SiteBakkie</span><b id="c-sb">R4,250</b><small>a month</small></div>
+            <div class="win"><span>You save</span><b id="c-save">R8,250</b><small>a month · <b id="c-year">R99,000</b> a year</small></div>
+          </div>
+        </div>
+      </div>
+
       <div class="prices">
-        <div class="price founder-card"><span class="pill">Builders &amp; principal contractors</span>
-          <h3>Per site</h3><div class="amt">R850<span>/site/month</span></div>
-          <p>Plus <b>R1,500 set-up</b> per site, first month included. The monthly price drops from your sixth site.</p>
-          <table class="tiers">
-            <tr><td>Sites 1–5</td><td>R850</td></tr>
-            <tr><td>Sites 6–15</td><td>R650</td></tr>
-            <tr><td>Site 16 onwards</td><td>R450</td></tr>
-          </table>
+        <div class="price founder-card"><span class="pill">Builders</span>
+          <h3>Per site</h3><div class="amt">R850<span> a site, a month</span></div>
+          <ul class="ticks"><li>Everything included</li><li>R1,500 once to set up a new site</li>
+            <li>Cheaper from your 6th site (R650) and 16th site (R450)</li></ul>
           <a href="/app.html#signup" class="btn btn-accent">Start free trial</a></div>
         <div class="price"><span class="pill">Subcontractors</span>
-          <h3>Short job</h3><div class="amt">R595<span>/job</span></div>
-          <p>For a job of 30 days or less. No set-up fee. Working on a site that a SiteBakkie builder runs? <b>You pay nothing</b>: the builder's site covers you.</p>
+          <h3>Short job</h3><div class="amt">R595<span> a job</span></div>
+          <ul class="ticks"><li>For jobs of 30 days or less</li><li>No set-up fee</li>
+            <li><b>Free</b> on a site where the builder uses SiteBakkie</li></ul>
           <a href="/app.html#signup" class="btn btn-dark">Start free trial</a></div>
-        <div class="price"><span class="pill">Save 2 months</span>
-          <h3>Annual</h3><div class="amt">R8,500<span>/site/year</span></div>
-          <p>Pay 10 months, get 12, for each site. Sites 6–15 are R6,500 a year, and site 16 onwards R4,500.</p>
+        <div class="price"><span class="pill">Pay yearly</span>
+          <h3>2 months free</h3><div class="amt">R8,500<span> a site, a year</span></div>
+          <ul class="ticks"><li>Pay for 10 months, use 12</li><li>Same discounts from your 6th site</li></ul>
           <a href="/app.html#signup" class="btn btn-dark">Start free trial</a></div>
       </div>
-      <div class="example">
-        <div><b>Example: a builder with 10 open sites</b><br>5 × R850 + 5 × R650 = <b>R7,500 a month</b>, or R75,000 a year on the annual plan.</div>
-        <div class="example-vs">Paper safety files at about R2,500 per site: <b>R25,000 a month</b>.</div>
-      </div>
-      <p class="fine">14 days free on one site, no card needed. Closed sites stay readable at no charge. Subcontractors on a SiteBakkie builder's site are free. Draft pricing for the pilot: it may change before launch.</p>
+      <p class="fine">Try it free for 14 days on one site. No card needed. Consultant cost is what builders tell us they pay today. Draft pricing for the pilot: it may change before launch.</p>
     </div>
   </section>
 
@@ -274,6 +288,24 @@
 </footer>
 
 <script>
+  // Savings calculator: SiteBakkie's volume steps against about R2,500 a site for paper files.
+  (function () {
+    var n = document.getElementById("calc-n"); if (!n) return;
+    var rand = function (v) { return "R" + Math.round(v).toString().replace(/\B(?=(\d{3})+(?!\d))/g, ","); };
+    var cost = function (k) { var t = 0; for (var i = 1; i <= k; i++) t += i <= 5 ? 850 : i <= 15 ? 650 : 450; return t; };
+    var show = function () {
+      var k = Math.max(1, Math.min(60, parseInt(n.value, 10) || 1)); n.value = k;
+      var paper = k * 2500, sb = cost(k);
+      document.getElementById("c-paper").textContent = rand(paper);
+      document.getElementById("c-sb").textContent = rand(sb);
+      document.getElementById("c-save").textContent = rand(paper - sb);
+      document.getElementById("c-year").textContent = rand((paper - sb) * 12);
+    };
+    document.querySelectorAll("[data-step]").forEach(function (b) {
+      b.onclick = function () { n.value = (parseInt(n.value, 10) || 0) + parseInt(b.dataset.step, 10); show(); };
+    });
+    n.oninput = show; show();
+  })();
   // Someone who has logged in before sees "Open app" instead of "Log in".
   try {
     if (localStorage.getItem("ss-token"))
