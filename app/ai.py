@@ -141,3 +141,103 @@ def risk_draft(description: str) -> dict:
         "ppe": {"type": "array", "items": {"type": "string"}},
     })
     return llm.call(RISK_SYSTEM, f"Activity: {description}", schema=schema)
+
+
+# ---------------------------------------------------------------- import a consultant's risk assessment
+
+RA_SYSTEM = """You read a construction baseline risk assessment (South Africa) and copy it into structured data exactly.
+
+Rules:
+- Copy every row. Keep the consultant's wording for activities, hazards, consequences and controls. Do not improve, merge or add anything.
+- Split the control measures into separate controls where the text lists several ("Issue gloves, dust masks" stays one control per instruction).
+- Scores: copy the numbers as written. Consequence (C), likelihood (L), rating. Revised C, L, rating after controls. Use 0 when a number is missing. Do not correct numbers, even when they look wrong.
+- "responsible": the text in the "action assigned to" column.
+- "accepted": true only when the acceptance-of-responsibility cell holds a name or signature.
+- PPE: list the PPE the controls name for that row (gloves, dust masks, hearing protection, head protection = hard hat, protective footwear = safety boots, long pants).
+- Header: reference number, RA number, revision, date, review date, description of the work, location, the risk assessment team (name and title), and whether a client approval is filled in.
+- Matrix: if the document has a risk matrix, give the band name for each likelihood (1-5) and consequence (1-5) cell; else leave it empty."""
+
+
+def ra_extract(name: str, data: bytes) -> dict:
+    row = _obj({
+        "item": {"type": "string"}, "activity": {"type": "string"}, "hazards": {"type": "string"},
+        "consequence": {"type": "string"}, "c": {"type": "integer"}, "l": {"type": "integer"},
+        "rating": {"type": "integer"}, "controls": {"type": "array", "items": {"type": "string"}},
+        "rc": {"type": "integer"}, "rl": {"type": "integer"}, "rrating": {"type": "integer"},
+        "responsible": {"type": "string"}, "accepted": {"type": "boolean"},
+        "ppe": {"type": "array", "items": {"type": "string"}}})
+    schema = _obj({
+        "header": _obj({"reference": {"type": "string"}, "ra_no": {"type": "string"}, "revision": {"type": "string"},
+                        "date": {"type": "string"}, "review_date": {"type": "string"},
+                        "description": {"type": "string"}, "location": {"type": "string"},
+                        "team": {"type": "array", "items": _obj({"name": {"type": "string"}, "title": {"type": "string"}})},
+                        "client_approved": {"type": "boolean"}}),
+        "rows": {"type": "array", "items": row},
+        "matrix": {"type": "array", "items": _obj({"l": {"type": "integer"}, "c": {"type": "integer"},
+                                                  "band": {"type": "string"}})},
+    })
+    return llm.call(RA_SYSTEM, llm.file_blocks(name, data) + [{"type": "text", "text": "Copy this risk assessment."}],
+                    schema=schema, max_tokens=32000)
+
+
+# ---------------------------------------------------------------- import a client's H&S specification
+
+SPEC_SYSTEM = """You read a client's construction health and safety specification (South Africa, Construction Regulations 2014) and pull out the requirements a site app can track.
+
+Rules:
+- Only requirements the document states. Quote the clause number for each. Use null or an empty list when the document says nothing.
+- Frequencies in days: "weekly" = 7, "monthly" = 30, "every 3 months" = 90, "daily" = 1.
+- required_documents: documents that must be in the site H&S file or submitted (policies, organogram, emergency procedure, fire risk survey, fall protection plan, method statements, H&S plan, notification, COID proof, appointments, agreements, etc.). Map each to the nearest section key.
+- required_appointments: map each to the nearest appointment key, or "other".
+- client_hazards: the hazards the client says the risk assessment must include.
+- key_rules: up to 25 short site rules for workers and visitors, in plain English, from the rules of conduct, PPE, transport and similar clauses.
+- acceptance_signatories: who must sign acceptance of the specification.
+- ra_team_required: the roles the specification says must be part of the risk assessment team and sign it."""
+
+
+def spec_extract(name: str, data: bytes, appointment_keys: list[str], section_keys: list[str],
+                 checklist_keys: list[str]) -> dict:
+    nint = {"type": ["integer", "null"]}
+    schema = _obj({
+        "project": {"type": "string"}, "client": {"type": "string"}, "author": {"type": "string"},
+        "date": {"type": "string"},
+        "frequencies": _obj({"toolbox_talk_days": nint, "environmental_talks_min": nint,
+                             "first_drill_within_days": nint, "evacuation_drill_days": nint,
+                             "committee_meeting_days": nint, "audit_days": nint, "injury_report_days": nint,
+                             "scaffold_inspection_days": nint, "ladder_inspection_days": nint,
+                             "temporary_works_inspection_days": nint, "observation_days": nint}),
+        "required_documents": {"type": "array", "items": _obj({
+            "title": {"type": "string"}, "clause": {"type": "string"},
+            "section": {"type": "string", "enum": section_keys + ["other"]}})},
+        "required_appointments": {"type": "array", "items": _obj({
+            "title": {"type": "string"}, "clause": {"type": "string"},
+            "key": {"type": "string", "enum": appointment_keys + ["other"]}})},
+        "permits": {"type": "array", "items": {"type": "string", "enum": ["hot_work", "electrical", "work_at_height",
+                                                                        "excavation", "confined_space", "other"]}},
+        "client_hazards": {"type": "array", "items": {"type": "string"}},
+        "required_inspections": {"type": "array", "items": _obj({
+            "item": {"type": "string"}, "clause": {"type": "string"},
+            "checklist": {"type": "string", "enum": checklist_keys + ["other"]}, "days": nint})},
+        "ppe_minimum": {"type": "array", "items": {"type": "string"}},
+        "injury_categories": {"type": "array", "items": {"type": "string"}},
+        "facilities": _obj({"toilet_per_workers": nint, "shower_per_workers": nint}),
+        "acceptance_signatories": {"type": "array", "items": {"type": "string"}},
+        "ra_team_required": {"type": "array", "items": {"type": "string"}},
+        "key_rules": {"type": "array", "items": _obj({"clause": {"type": "string"}, "rule": {"type": "string"}})},
+    })
+    return llm.call(SPEC_SYSTEM, llm.file_blocks(name, data) + [{"type": "text", "text": "Extract the requirements."}],
+                    schema=schema, max_tokens=32000)
+
+
+COVER_SYSTEM = """You check whether a site's risk assessment covers each hazard that the client's specification lists.
+For each client hazard, list the ids of the risk assessment items that address it directly (the activity or its hazards and controls deal with that hazard). If none does, give an empty list. Be strict: a passing mention without controls is "partial"."""
+
+
+def hazard_coverage(client_hazards: list[str], items: list[dict]) -> dict:
+    schema = _obj({"results": {"type": "array", "items": _obj({
+        "hazard": {"type": "string"}, "status": {"type": "string", "enum": ["covered", "partial", "missing"]},
+        "item_ids": _ids_schema([i["id"] for i in items]), "note": {"type": "string"}})}})
+    ctx = [{"id": i["id"], "activity": i["activity"],
+            "hazards": [h["hazard"] + ": " + "; ".join(h.get("controls", [])) for h in i["hazards"]]} for i in items]
+    return llm.call(COVER_SYSTEM, f"Client hazards:\n{json.dumps(client_hazards)}\n\nRisk assessment items:\n"
+                    f"{json.dumps(ctx, ensure_ascii=False)}", schema=schema)

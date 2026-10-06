@@ -327,6 +327,29 @@ APPOINTMENTS = {
                   "employees on health and safety matters. (Required where more than 20 employees work.)"},
 }
 
+APPOINTMENTS.update({
+    "assistant_manager": {"title": "Assistant construction manager", "reg": "8(2)", "who": "user", "aes": True,
+        "duties": "Manage the section of the construction work named in this appointment, with the duties of the "
+                  "construction manager for that section."},
+    "assistant_supervisor": {"title": "Assistant construction supervisor", "reg": "8(8)", "who": "any", "aes": False,
+        "duties": "Assist the construction supervisor with the duties set out in this appointment."},
+    "ladder_inspector": {"title": "Ladder inspector (competent person)", "reg": "GSR 13A", "who": "any", "aes": False,
+        "duties": "Inspect all ladders monthly and before use after any damage. Record the results in the register. "
+                  "Remove defective ladders from use."},
+    "temporary_works_designer": {"title": "Temporary works designer", "reg": "12(1)", "who": "any", "aes": True,
+        "duties": "Design, inspect and approve the erected temporary works on site before use."},
+    "temporary_works_supervisor": {"title": "Temporary works supervisor (competent person)", "reg": "12(2)", "who": "any", "aes": True,
+        "duties": "Supervise all temporary works operations. Inspect before, during and after concrete placement, "
+                  "after bad weather and daily, and record the results. Authorise casting and stripping in writing."},
+    "machinery_inspector": {"title": "Machinery inspector (competent person)", "reg": "DMR 2, 18", "who": "any", "aes": False,
+        "duties": "Inspect driven machinery regularly and make sure it is maintained. Keep the inspection records."},
+    "stacking_supervisor": {"title": "Stacking and storage supervisor", "reg": "28(a)", "who": "any", "aes": False,
+        "duties": "Supervise the stacking and storage of materials. Keep storage areas safe, designated and controlled."},
+    "scaffold_inspector": {"title": "Scaffold inspector (competent person)", "reg": "16, SANS 10085", "who": "any", "aes": False,
+        "duties": "Inspect scaffolds before first use, weekly and after bad weather. Tag each scaffold safe or unsafe "
+                  "and record the results."},
+})
+
 # Which appointments each site needs, by feature (None = always).
 REQUIRED_APPOINTMENTS = [
     ("construction_manager", None), ("construction_supervisor", None), ("risk_assessor", None),
@@ -384,3 +407,154 @@ AUDIT_ITEMS = [
     ("contractors", "Contractors appointed, COID good standing, agreements", "7(1)(c), 7(1)(f)"),
     ("incidents", "Incidents reported and investigated", "OHS s24, GAR 8-9"),
 ]
+
+
+# ---------------------------------------------------------------- risk matrix
+# 5x5 consequence x likelihood, as used by SA construction H&S consultants
+# (for example the Eden View baseline risk assessment). Band per cell.
+CONSEQUENCE = {1: "Insignificant", 2: "Minor", 3: "Moderate", 4: "Major", 5: "Catastrophic"}
+LIKELIHOOD = {1: "Rare", 2: "Unlikely", 3: "Possible", 4: "Likely", 5: "Almost certain"}
+BANDS = {  # BANDS[likelihood][consequence]
+    5: {1: "Medium", 2: "Significant", 3: "Significant", 4: "High", 5: "High"},
+    4: {1: "Medium", 2: "Medium", 3: "Significant", 4: "High", 5: "High"},
+    3: {1: "Low", 2: "Medium", 3: "Significant", 4: "Significant", 5: "High"},
+    2: {1: "Low", 2: "Low", 3: "Medium", 4: "Significant", 5: "Significant"},
+    1: {1: "Low", 2: "Low", 3: "Medium", 4: "Medium", 5: "Significant"},
+}
+BAND_LEVEL = {"Low": "L", "Medium": "M", "Significant": "H", "High": "H"}
+
+
+def band(c, l) -> str:
+    try:
+        return BANDS[int(l)][int(c)]
+    except (KeyError, TypeError, ValueError):
+        return ""
+
+
+# ---------------------------------------------------------------- generic forms
+# Records that follow one simple pattern: fields, then signatures. One UI, one
+# normaliser and one PDF layout serve all of them ("one set format").
+PPE_ITEMS = ["Hard hat", "Safety boots", "Overalls", "Reflective vest", "Safety glasses", "Gloves",
+             "Hearing protection", "Dust mask / respirator", "Double-lanyard full body harness", "Gumboots",
+             "Welding helmet", "Face shield"]
+PERMIT_TYPES = {"hot_work": "Hot work", "electrical": "Electrical work", "work_at_height": "Work at height",
+                "excavation": "Excavation", "confined_space": "Confined space", "other": "Other"}
+
+FORMS = {
+    "drill": {"title": "Emergency evacuation drill", "reg": "ERW 9, CR 29, client spec", "icon": "🚨",
+              "purpose": "Practise the evacuation: within 3 months of site start, then at least every 3 months.",
+              "fields": [
+                  {"k": "scenario", "label": "Scenario", "type": "text", "ph": "Fire at the site office"},
+                  {"k": "alarm", "label": "How people were alerted", "type": "text", "ph": "Air horn, 3 long blasts"},
+                  {"k": "minutes", "label": "Minutes until everyone was at the assembly point", "type": "number"},
+                  {"k": "people", "label": "People evacuated", "type": "number"},
+                  {"k": "all_counted", "label": "Everyone accounted for", "type": "yesno", "req": True},
+                  {"k": "findings", "label": "What went well and what to improve", "type": "textarea"}],
+              "signers": [{"role": "conductor", "who": "me", "label": "Person who ran the drill"}]},
+    "meeting": {"title": "H&S committee meeting", "reg": "OHS Act s19, client spec", "icon": "👥",
+                "purpose": "Monthly meeting of the H&S committee. Keep the minutes.",
+                "fields": [
+                    {"k": "attendees", "label": "Attendees", "type": "textarea", "req": True, "ph": "Names and roles"},
+                    {"k": "agenda", "label": "Agenda", "type": "textarea"},
+                    {"k": "minutes", "label": "Minutes and decisions", "type": "textarea", "req": True},
+                    {"k": "actions", "label": "Actions (who, what, by when)", "type": "textarea"}],
+                "signers": [{"role": "chair", "who": "me", "label": "Chairperson"}]},
+    "observation": {"title": "Planned task observation", "reg": "CR 9(3), client spec", "icon": "👁️",
+                    "purpose": "Watch a worker do a task and check it against the safe work procedure.",
+                    "fields": [
+                        {"k": "worker", "label": "Worker observed", "type": "worker", "req": True},
+                        {"k": "task", "label": "Task", "type": "text", "req": True},
+                        {"k": "procedure", "label": "Safe work procedure followed", "type": "select",
+                         "options": ["Yes", "Partly", "No"], "req": True},
+                        {"k": "ppe_ok", "label": "Correct PPE worn", "type": "yesno", "req": True},
+                        {"k": "unsafe", "label": "Unsafe acts or conditions seen", "type": "textarea"},
+                        {"k": "feedback", "label": "Feedback given to the worker", "type": "textarea"}],
+                    "signers": [{"role": "observer", "who": "me", "label": "Observer"},
+                                {"role": "worker", "who": "field:worker", "label": "Worker"}]},
+    "ppe_issue": {"title": "PPE issue", "reg": "GSR 2, client spec", "icon": "🦺",
+                  "purpose": "Record the PPE a worker receives. The worker confirms they understand its use.",
+                  "fields": [
+                      {"k": "worker", "label": "Worker", "type": "worker", "req": True},
+                      {"k": "items", "label": "PPE issued", "type": "multi", "options": PPE_ITEMS, "req": True},
+                      {"k": "reason", "label": "Reason", "type": "select",
+                       "options": ["First issue", "Replacement: worn out or damaged", "Replacement: lost or stolen"], "req": True},
+                      {"k": "understood", "label": "The worker understands why, where and how to use this PPE", "type": "yesno", "req": True}],
+                  "signers": [{"role": "worker", "who": "field:worker", "label": "Worker"},
+                              {"role": "issuer", "who": "me", "label": "Issued by"}]},
+    "permit": {"title": "Permit to work", "reg": "Client spec, CR 10, 24", "icon": "🎫",
+               "purpose": "Before hot work, electrical work or work at height: check the precautions, then issue the permit.",
+               "fields": [
+                   {"k": "type", "label": "Permit type", "type": "select", "options": list(PERMIT_TYPES.values()), "req": True},
+                   {"k": "location", "label": "Where", "type": "text", "req": True},
+                   {"k": "work", "label": "Work to be done", "type": "textarea", "req": True},
+                   {"k": "valid_until", "label": "Valid until (time today)", "type": "time", "req": True},
+                   {"k": "precautions", "label": "Precautions in place", "type": "multi", "req": True, "options": [
+                       "Area barricaded and signs up", "Fire extinguisher at the work position", "Flammables removed",
+                       "Fire watch arranged after the work", "Power isolated, locked and tagged out", "Tested for dead",
+                       "Fall protection plan applies; harness and anchor checked", "Edge protection in place",
+                       "Rescue plan in place", "Workers briefed on the risk assessment"]},
+                   {"k": "notes", "label": "Other conditions", "type": "textarea"}],
+               "signers": [{"role": "issuer", "who": "me", "label": "Permit issuer"},
+                           {"role": "receiver", "who": "pick", "label": "Person in charge of the work"}]},
+    "permit_close": {"title": "Permit closed", "reg": "Client spec", "icon": "✅",
+                     "purpose": "Close the permit when the work is done and the area is safe.",
+                     "fields": [
+                         {"k": "permit", "label": "Permit", "type": "open_permit", "req": True},
+                         {"k": "complete", "label": "Work complete and area left safe", "type": "yesno", "req": True},
+                         {"k": "notes", "label": "Notes", "type": "textarea"}],
+                     "signers": [{"role": "issuer", "who": "me", "label": "Permit issuer"}]},
+    "ra_acceptance": {"title": "Risk assessment: acceptance of responsibility", "reg": "CR 9(1), client spec", "icon": "🤝",
+                      "purpose": "The person assigned to actions in the risk assessment accepts responsibility for them.",
+                      "fields": [
+                          {"k": "role", "label": "Role in the risk assessment", "type": "ra_role", "req": True},
+                          {"k": "statement", "label": "Statement", "type": "fixed",
+                           "value": "I accept responsibility for the controls and actions assigned to my role in the "
+                                    "risk assessment for this site, and I will see that they are applied."}],
+                      "signers": [{"role": "responsible", "who": "pick", "label": "Responsible person"}]},
+}
+
+# Permit types that the work in a task sheet calls for (by activity name).
+PERMIT_TRIGGERS = {"Hot work": ("hot work", "welding", "cutting", "grinding"),
+                   "Electrical work": ("electrical",),
+                   "Work at height": ("height", "roof", "scaffold")}
+
+INCIDENT_TYPES.update({"disabling": "Disabling injury", "fatal": "Fatality"})
+
+# Extra checklists the client spec asks for (2.15.1, 3.6, 3.8).
+CHECKLISTS["harness"] = {"title": "Safety harness inspection", "kind": "inspection", "items": [
+    {"q": "Double-lanyard full body harness (no safety belts on site)", "critical": True},
+    {"q": "Webbing not cut, frayed, burnt or stained by chemicals", "critical": True},
+    {"q": "Stitching complete", "critical": True}, {"q": "Buckles, D-rings and snap hooks work and lock", "critical": True},
+    {"q": "Lanyards and shock absorber not deployed or damaged", "critical": True},
+    {"q": "Inspection tag current"}]}
+CHECKLISTS["stacking"] = {"title": "Stacking and storage inspection", "kind": "inspection", "items": [
+    {"q": "Stacks on firm, level ground and stable", "critical": True},
+    {"q": "Stack height within limits; no material taken from the bottom", "critical": True},
+    {"q": "Storage area barricaded where people could enter"}, {"q": "Walkways clear"},
+    {"q": "Flammables and gas cylinders stored apart and upright", "critical": True}]}
+CHECKLISTS["hand_tools"] = {"title": "Hand tool inspection", "kind": "inspection", "items": [
+    {"q": "Handles sound and tight", "critical": True}, {"q": "Heads not mushroomed or cracked", "critical": True},
+    {"q": "Cutting edges sharp and guarded"}, {"q": "Right tool for the job"}]}
+CHECKLISTS["temporary_works"] = {"title": "Temporary works inspection", "kind": "inspection",
+    "note": "CR 12(3)(f): inspect before, during and after concrete placement, after bad weather, and at least daily.",
+    "items": [{"q": "Erected to the temporary works design drawing", "critical": True},
+              {"q": "Props, braces and ties in place and secure", "critical": True},
+              {"q": "Foundation / base sound", "critical": True}, {"q": "No damage or weakening", "critical": True},
+              {"q": "Safe access to the work above", "critical": False},
+              {"q": "Written authorisation before casting (CR 12(3)(g))", "critical": False}]}
+CHECKLISTS["earthmoving"]["items"][3] = {"q": "Hooter, reverse siren and rotating orange beacon work", "critical": True}
+CHECKLISTS["vehicle"]["items"][4] = {"q": "Workers carried only in a covered load area with proper seats; "
+                                          "no more than 2 passengers in an LDV cab", "critical": True}
+
+INSPECTION_SCHEDULE["harness"] = {"every": "month", "days": 30, "feature": "work_at_height", "reg": "GSR 6, spec 2.15"}
+INSPECTION_SCHEDULE["temporary_works"] = {"every": "day", "days": 1, "feature": "temporary_works", "reg": "12(3)(f)"}
+SITE_FEATURES["temporary_works"] = "Temporary works (formwork, propping)"
+
+FILE_SECTIONS.insert(0, {"key": "policies", "title": "Company policies: OHS, alcohol and drugs, HIV/AIDS, environmental", "type": "upload"})
+FILE_SECTIONS.insert(5, {"key": "organogram", "title": "Organogram: H&S site management structure", "type": "upload"})
+FILE_SECTIONS.insert(9, {"key": "fire_survey", "title": "Fire risk survey", "type": "upload"})
+FILE_SECTIONS.append({"key": "registers", "title": "Registers: drills, committee minutes, observations, PPE issue, permits",
+                      "type": "auto"})
+UPLOAD_SECTIONS = {s["key"] for s in FILE_SECTIONS if "upload" in s["type"]}
+
+AES_DOCS["spec_acceptance"] = "Acceptance of the client's H&S specification"

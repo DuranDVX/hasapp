@@ -4,7 +4,9 @@ const TILE_ICON = {
   task_sheet: "📋", toolbox_talk: "🗣️", visitors: "🪪", inductions: "👷", medicals: "🩺", certificates: "🎓",
   plant_checks: "🚜", operators: "🪪", esign: "🖊️", appointments: "📜", aes: "✍️", risk: "⚠️", hs_plan: "📘",
   client_spec: "📗", notification: "📨", coid: "🛡️", fall_plan: "🪢", emergency: "🚨", contractors: "🤝",
-  audit: "🔍", incidents: "🚑", device_copy: "📴",
+  audit: "🔍", incidents: "🚑", device_copy: "📴", policies: "📕", organogram: "🧩", fire_survey: "🔥",
+  ra_doc: "📑", ra_acceptance: "🤝", spec_acceptance: "✍️", client_hazards: "🎯", env_talks: "🌿", drill: "🚨",
+  meeting: "👥", observation: "👁️", ppe_issue: "🦺", permits: "🎫", facilities: "🚻",
 };
 const STATUS_WORD = { red: "ACTION", amber: "SOON", green: "OK", na: "N/A" };
 
@@ -56,6 +58,9 @@ VIEWS.board = async () => {
 const RECORD_ACTIONS = [
   ["task", "📋", "Daily task sheet"], ["talk", "🗣️", "Toolbox talk"], ["check", "🚜", "Plant check"],
   ["inspections", "🔎", "Site inspection"], ["visitor", "🪪", "Visitor"], ["incident", "🚨", "Incident"],
+  ["form/permit", "🎫", "Permit to work"], ["form/ppe_issue", "🦺", "PPE issue"],
+  ["form/observation", "👁️", "Task observation"], ["form/drill", "🚨", "Evacuation drill"],
+  ["form/meeting", "👥", "Committee meeting"], ["form/permit_close", "✅", "Close a permit"],
   ["appoint", "📜", "Appointment"], ["audit", "🔍", "Audit"],
 ];
 ACT.record = () => {
@@ -90,6 +95,9 @@ VIEWS.setup = () => {
   render(`${head("Site setup", "Tick what this site has. The board then shows only the duties that apply.", "board")}
     <div class="card">${Object.entries(S.data.site_features).map(([k, v]) =>
       `<label class="check"><input type="checkbox" data-f="${k}" ${f[k] ? "checked" : ""}> ${esc(v)}</label>`).join("")}</div>
+    <div class="card"><b>Facilities on site</b><div class="grid2"><div><label>Toilets</label><input id="su-toilets" inputmode="numeric" value="${esc(site.facilities?.toilets ?? "")}"></div>
+      <div><label>Showers</label><input id="su-showers" inputmode="numeric" value="${esc(site.facilities?.showers ?? "")}"></div></div></div>
+    ${site.has_ra ? `<div class="card"><label class="check"><input type="checkbox" id="su-raonly" ${site.ra_only ? "checked" : ""}> Use only the consultant's risk assessment on this site</label></div>` : ""}
     <div class="card"><label class="check"><input type="checkbox" id="su-print" ${site.print_required ? "checked" : ""}> The client wants paper copies</label>
       <p class="muted small">The app still keeps the electronic original. Use the Print centre for the paper copies.</p></div>
     <div class="card"><button class="link" data-act="nav" data-to="site/${site.id}">Edit site name, client and emergency details ›</button></div>
@@ -99,7 +107,10 @@ ACT["setup-save"] = (btn) => busy(btn, "Saving…", async () => {
   if (needOnline()) return;
   const features = {};
   document.querySelectorAll("[data-f]").forEach((x) => { features[x.dataset.f] = x.checked; });
-  await api("/api/sites/" + S.siteId, { method: "PUT", json: { features, print_required: $("#su-print").checked } });
+  const body = { features, print_required: $("#su-print").checked,
+    facilities: { toilets: $("#su-toilets").value || "0", showers: $("#su-showers").value || "0" } };
+  if ($("#su-raonly")) body.ra_only = $("#su-raonly").checked;
+  await api("/api/sites/" + S.siteId, { method: "PUT", json: body });
   await loadMe(); await loadSite(true); toast("Saved.", "ok"); go("board");
 });
 

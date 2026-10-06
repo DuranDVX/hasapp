@@ -22,6 +22,7 @@ KINDS = {"task_sheet": "Daily task sheet", "toolbox_talk": "Toolbox talk",
          "induction": "Site induction", "visitor": "Visitor induction",
          "appointment": "Legal appointment", "audit": "Health and safety audit",
          "audit_ack": "Audit report received", "investigation": "Incident investigation"}
+KINDS.update({k: f["title"] for k, f in library.FORMS.items()})
 GENESIS = "0" * 64
 _chain_lock = threading.Lock()
 
@@ -111,7 +112,7 @@ def _toolbox_talk(s, cid, site_id, p: dict) -> dict:
            "language": lang, "text": _text(p.get("text"), 8000), "text_en": _text(p.get("text_en"), 8000),
            "key_points": [_text(x, 300) for x in (p.get("key_points") or [])[:10]],
            "questions": [_text(x, 300) for x in (p.get("questions") or [])[:10]],
-           "ai_translated": bool(p.get("ai_translated")),
+           "ai_translated": bool(p.get("ai_translated")), "environmental": bool(p.get("environmental")),
            "task_sheet_id": _text(p.get("task_sheet_id"), 16)}
     if not (out["text"] or out["topic"]):
         raise HTTPException(400, "Add the talk text or at least the topic.")
@@ -177,6 +178,10 @@ def _induction(s, cid, site_id, p: dict, company: db.Company) -> dict:
     if not s.get(db.SiteWorker, (site_id, w.id)):
         s.add(db.SiteWorker(site_id=site_id, worker_id=w.id))
     text = company.induction_text or library.DEFAULT_INDUCTION
+    site = s.get(db.Site, site_id)
+    rules = (((site.settings or {}).get("spec") or {}).get("key_rules") or []) if site else []
+    if rules:
+        text += "\n\nClient's site rules\n" + "\n".join(f"- {r['rule']} ({r['clause']})" for r in rules[:25])
     if not p.get("consent"):
         raise HTTPException(400, "The worker must agree to e-signatures and the privacy notice.")
     return {"worker_id": w.id, "worker_name": w.name, "induction_text": text,
@@ -271,6 +276,53 @@ def _investigation(s, cid, site_id, p: dict) -> dict:
     return out
 
 
+def _form(s, cid, site_id, kind: str, p: dict) -> dict:
+    """Generic form: validate each field against library.FORMS[kind]."""
+    spec = library.FORMS[kind]
+    out = {"form": kind, "title": spec["title"], "reg": spec["reg"], "fields": []}
+    for f in spec["fields"]:
+        v, t = p.get(f["k"]), f["type"]
+        if t == "fixed":
+            val = f["value"]
+        elif t == "number":
+            try:
+                val = float(v) if v not in (None, "") else None
+            except (TypeError, ValueError):
+                raise HTTPException(400, f"{f['label']}: give a number.")
+        elif t == "yesno":
+            val = None if v in (None, "") else bool(v) and v not in ("no", "false", False)
+        elif t == "multi":
+            val = [x for x in (v or []) if x in f["options"]]
+        elif t == "select":
+            val = v if v in f["options"] else ""
+        elif t == "worker":
+            w = s.get(db.Worker, v or "")
+            if v and (not w or w.company_id != cid):
+                raise HTTPException(400, "Unknown worker.")
+            val = {"id": w.id, "name": w.name} if w else None
+        elif t == "open_permit":
+            r = s.get(db.Record, v or "")
+            if v and (not r or r.company_id != cid or r.kind != "permit"):
+                raise HTTPException(400, "Unknown permit.")
+            val = {"id": r.id, "date": r.record_date.isoformat(), "summary": summary(r)} if r else None
+        else:
+            val = _text(v, 6000 if t == "textarea" else 300)
+        empty = val in (None, "", [])
+        if f.get("req") and empty:
+            raise HTTPException(400, f"Fill in: {f['label']}.")
+        if f["type"] == "yesno" and f.get("req") and f["k"] in ("understood", "complete") and val is not True:
+            raise HTTPException(400, f"{f['label']}: this must be yes before signing.")
+        out["fields"].append({"k": f["k"], "label": f["label"], "type": t, "value": val})
+    return out
+
+
+def form_value(rec, key):
+    for f in (rec.payload or {}).get("fields", []):
+        if f["k"] == key:
+            return f["value"]
+    return None
+
+
 # ---------------------------------------------------------------- hashing
 
 def canonical(rec: db.Record) -> str:
@@ -332,7 +384,8 @@ def create(ctx, body: dict) -> str:
                    "appointment": lambda: _appointment(s, cid, site.id, p),
                    "audit": lambda: _audit(s, cid, site.id, p),
                    "audit_ack": lambda: _audit_ack(s, cid, site.id, p),
-                   "investigation": lambda: _investigation(s, cid, site.id, p)}[kind]()
+                   "investigation": lambda: _investigation(s, cid, site.id, p),
+                   **{k: (lambda k=k: _form(s, cid, site.id, k, p)) for k in library.FORMS}}[kind]()
         payload = _store_files(cid, payload)
         audio = ""
         if body.get("audio"):
@@ -435,6 +488,17 @@ def summary(rec: db.Record) -> str:
         return f"Report of audit {p.get('audit_date')} received"
     if rec.kind == "investigation":
         return f"Incident {p.get('incident_date')}: " + ("reported" if p.get("reportable") else "not reportable")
+    if rec.kind in library.FORMS:
+        def v(k):
+            x = form_value(rec, k)
+            return x.get("name") if isinstance(x, dict) else (", ".join(x) if isinstance(x, list) else x)
+        return {"drill": lambda: f"{v('scenario') or 'Drill'} · {v('minutes') or '?'} min",
+                "meeting": lambda: (v("minutes") or "")[:80],
+                "observation": lambda: f"{v('worker')}: {v('task')} · procedure {v('procedure')}",
+                "ppe_issue": lambda: f"{v('worker')}: {v('items')}",
+                "permit": lambda: f"{v('type')} · {v('location')} · until {v('valid_until')}",
+                "permit_close": lambda: f"Closed: {(form_value(rec, 'permit') or {}).get('summary', '')}",
+                "ra_acceptance": lambda: f"{v('role')}"}.get(rec.kind, lambda: "")()
     return ""
 
 

@@ -123,7 +123,8 @@ VIEWS.risks = () => {
     ${todo ? `<div class="note warn">${todo} of ${rs.length} activities are not approved yet. The starter items are drafts.</div>` : `<div class="note ok">All activities approved.</div>`}
     ${can.manage() ? `<button class="primary" data-act="nav" data-to="risk/new">+ New activity</button>` : ""}
     <div class="card" style="margin-top:10px"><ul class="plain">${rs.map((r) => `<li class="list-item" data-act="nav" data-to="risk/${r.id}">
-      <div class="grow"><b>${esc(r.activity)}</b><div class="muted small">${r.hazards.length} hazards${r.site_id ? " · this site only" : ""}</div></div>
+      <div class="grow"><b>${esc(r.activity)}</b><div class="muted small">${r.ref ? esc(r.ref) + " · " : ""}${r.hazards.length} hazard(s)${r.site_id ? " · this site" : ""}
+        ${r.hazards[0]?.rating ? scoreHtml(r.hazards[0]) : ""}</div></div>
       <span class="badge ${r.approved ? "ok" : "warn"}">${r.approved ? "Approved" : "Not approved"}</span></li>`).join("")}</ul></div>`);
 };
 VIEWS.risk = (id) => {
@@ -133,7 +134,8 @@ VIEWS.risk = (id) => {
   render(`<button class="link" data-act="nav" data-to="risks">‹ Library</button>
     <h1>${id === "new" ? "New activity" : esc(r.activity)}</h1>
     ${r.approved ? `<div class="note ok">Approved by ${esc(r.approved_by)} on ${esc(r.approved_at)}</div>` : id !== "new" ? `<div class="note warn">Not approved.</div>` : ""}
-    ${can.manage() ? `<div class="card">
+    ${r.source === "consultant_ra" ? `<div class="note info small">From the consultant's risk assessment (${esc(r.ref)}). Change it in the original and load the new revision.</div>${hazardHtml([r.id])}` :
+      can.manage() ? `<div class="card">
       ${id === "new" ? `<label>Describe the activity, then let the AI draft it (you check and approve)</label>
         <input id="rk-desc" placeholder="Installing a steel staircase with a mobile crane"><button class="dark" data-act="rk-ai">✨ Draft with AI</button><hr style="border:0;border-top:1px solid var(--line);margin:14px 0">` : ""}
       <label>Activity</label><input id="rk-act" value="${esc(r.activity)}">

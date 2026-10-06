@@ -15,7 +15,14 @@ from sqlalchemy.orm import selectinload
 from . import config, db, library
 
 GROUPS = ["Today", "People", "Plant and inspections", "Appointments and documents",
-          "Contractors", "Audits and incidents"]
+          "Contractors", "Audits and incidents", "Client specification"]
+
+
+def records_value(rec, key):
+    for f in (rec.payload or {}).get("fields", []):
+        if f["k"] == key:
+            return f["value"]
+    return None
 
 
 def _tile(group, key, title, reg, status, detail, action="", count=None):
@@ -38,6 +45,9 @@ def board(s, company: db.Company, site: db.Site, today: date, now_hour: int = 12
     feats = site.features or {}
     on = lambda f: f is None or bool(feats.get(f))
     tiles = []
+    cfg = site.settings or {}
+    spec = cfg.get("spec") or {}
+    freq = spec.get("frequencies") or {}
 
     recs = s.scalars(select(db.Record).where(db.Record.site_id == sid,
                                              db.Record.record_date >= today - timedelta(days=400))
@@ -62,8 +72,10 @@ def board(s, company: db.Company, site: db.Site, today: date, now_hour: int = 12
     talks = by_kind.get("toolbox_talk", [])
     last_talk = talks[-1].record_date if talks else None
     age = (today - last_talk).days if last_talk else None
-    tiles.append(_tile("Today", "toolbox_talk", "Toolbox talk", "9(3)",
-                       "green" if age is not None and age < 6 else "amber" if age is not None and age < 8 else "red",
+    tdays = freq.get("toolbox_talk_days") or 7
+    tiles.append(_tile("Today", "toolbox_talk", "Toolbox talk", "9(3)" + (", spec" if spec else ""),
+                       "green" if age is not None and age < tdays - 1 else
+                       "amber" if age is not None and age <= tdays else "red",
                        ("Talk done today." if age == 0 else f"Last talk {age} day(s) ago.") if age is not None
                        else "No talk recorded yet.", "talk"))
 
@@ -138,7 +150,20 @@ def board(s, company: db.Company, site: db.Site, today: date, now_hour: int = 12
                             "No operator authorisation on file." if plant and not authorised else
                             f"{len(authorised)} operator(s) authorised."), "appointments", len(unauth)))
 
-    for tpl, sched in library.INSPECTION_SCHEDULE.items():
+    schedule = {k: dict(v) for k, v in library.INSPECTION_SCHEDULE.items()}
+    equipment = {"scaffold", "excavation", "temporary_works", "material_hoist"}
+    for ri in spec.get("required_inspections") or []:
+        k = ri.get("checklist")
+        c = library.CHECKLISTS.get(k)
+        if not c or c["kind"] != "inspection":
+            continue
+        cur = schedule.get(k, {"every": "month", "days": 30, "feature": None, "reg": ""})
+        days = ri.get("days") or cur["days"]
+        cur.update(days=days, every={1: "day", 7: "week", 30: "month"}.get(days, f"{days} days"),
+                   reg=f"{cur['reg']}, spec {ri.get('clause', '')}".strip(", "),
+                   feature=cur["feature"] if k in equipment else None)
+        schedule[k] = cur
+    for tpl, sched in schedule.items():
         c = library.CHECKLISTS[tpl]
         if not on(sched["feature"]):
             continue
@@ -167,6 +192,15 @@ def board(s, company: db.Company, site: db.Site, today: date, now_hour: int = 12
     appts = by_kind.get("appointment", [])
     have = {r.payload.get("type") for r in appts}
     need = [k for k, f in library.REQUIRED_APPOINTMENTS if on(f)]
+    for a in spec.get("required_appointments") or []:
+        k = a.get("key")
+        gate = {"scaffold": "scaffolding", "scaffold_inspector": "scaffolding", "temporary_works_designer": "temporary_works",
+                "temporary_works_supervisor": "temporary_works", "fall_protection": "work_at_height"}.get(k)
+        if k in library.APPOINTMENTS and k not in need and k not in ("hs_rep", "assistant_manager", "assistant_supervisor") \
+                and (gate is None or feats.get(gate)):
+            need.append(k)
+    if len(workers) > 20 and "hs_rep" not in need:
+        need.append("hs_rep")    # OHS Act s17: more than 20 employees
     missing = [library.APPOINTMENTS[k]["title"] for k in need if k not in have]
     aes = s.scalars(select(db.AesDoc).where(db.AesDoc.company_id == cid,
                                             (db.AesDoc.site_id == sid) | (db.AesDoc.site_id.is_(None)))).all()
@@ -180,8 +214,10 @@ def board(s, company: db.Company, site: db.Site, today: date, now_hour: int = 12
                        f"{len(aes_wait)} document(s) wait for an advanced e-signature or wet ink."
                        if aes_wait else "All signed.", "aes", len(aes_wait)))
 
-    risks = s.scalars(select(db.RiskItem).where(db.RiskItem.company_id == cid, db.RiskItem.active,
-                                                (db.RiskItem.site_id.is_(None)) | (db.RiskItem.site_id == sid))).all()
+    rq = select(db.RiskItem).where(db.RiskItem.company_id == cid, db.RiskItem.active)
+    rq = rq.where(db.RiskItem.site_id == sid) if cfg.get("ra_only") else \
+        rq.where((db.RiskItem.site_id.is_(None)) | (db.RiskItem.site_id == sid))
+    risks = s.scalars(rq).all()
     used = {x["id"] for r in by_kind.get("task_sheet", []) if r.record_date >= today - timedelta(days=30)
             for t in r.payload.get("tasks", []) for x in t.get("risks", [])}
     used_unapproved = [r.activity for r in risks if r.id in used and not r.approved_at]
@@ -212,6 +248,19 @@ def board(s, company: db.Company, site: db.Site, today: date, now_hour: int = 12
     doc_tile("coid", "company", "COID letter of good standing", "5(1)(j)")
     doc_tile("fall_plan", "fall_protection", "Fall protection plan", "10", "work_at_height")
     doc_tile("emergency", "emergency", "Emergency plan", "GSR 3, ERW 9")
+    wanted = {d.get("section") for d in spec.get("required_documents") or []}
+    if "policies" in wanted:
+        n_pol = len([d for d in spec["required_documents"] if d.get("section") == "policies"])
+        have_pol = [d for d in docs if d.section == "policies"]
+        tiles.append(_tile("Appointments and documents", "policies", "Company policies (signed)", "spec 2.1-2.3, 4.3",
+                           "green" if len(have_pol) >= n_pol else "red" if not have_pol else "amber",
+                           f"{len(have_pol)} of {n_pol} on file: " + ", ".join(d["title"].split(" signed")[0]
+                                                                         for d in spec["required_documents"] if d.get("section") == "policies"),
+                           "file", n_pol - len(have_pol)))
+    if "organogram" in wanted:
+        doc_tile("organogram", "organogram", "Organogram", "spec 2.4.11")
+    if "fire_survey" in wanted:
+        doc_tile("fire_survey", "fire_survey", "Fire risk survey", "spec 3.4.3")
 
     # ------------------------------------------------------------ Contractors
     contractors = s.scalars(select(db.Contractor).where(db.Contractor.site_id == sid, db.Contractor.active)).all()
@@ -273,6 +322,114 @@ def board(s, company: db.Company, site: db.Site, today: date, now_hour: int = 12
         st, detail = "green", f"{len(incidents)} incident(s), all investigated."
     tiles.append(_tile("Audits and incidents", "incidents", "Incidents investigated and reported",
                        "OHS s24, GAR 8-9", st, detail, "incidents", len(open_inc)))
+
+    # ------------------------------------------------------------ consultant's risk assessment
+    G = "Client specification"
+    ra = cfg.get("ra")
+    if ra:
+        reds = [f for f in ra.get("flags", []) if f["level"] == "red"]
+        ambers = [f for f in ra.get("flags", []) if f["level"] == "amber"]
+        h = ra.get("header", {})
+        tiles.append(_tile(G, "ra_doc", "Baseline risk assessment", "9(1)",
+                           "red" if reds else "amber" if ambers else "green",
+                           (f"{len(reds)} problem(s): {reds[0]['text']}" if reds else
+                            f"{len(ambers)} point(s) to fix: {ambers[0]['text']}" if ambers else
+                            f"RA {h.get('ra_no', '')} by {', '.join(t.get('name', '') for t in h.get('team', []))} in use."),
+                           "consultant", len(reds)))
+        roles = ra.get("roles") or []
+        accepted = {str(records_value(r, "role")).lower() for r in by_kind.get("ra_acceptance", [])}
+        missing_roles = [r for r in roles if r.lower() not in accepted]
+        tiles.append(_tile(G, "ra_acceptance", "Risk assessment accepted by those responsible", "9(1), spec 2.9.3.5",
+                           "red" if missing_roles else "green",
+                           ("Not accepted yet: " + "; ".join(missing_roles[:3])) if missing_roles else "All responsible roles accepted.",
+                           "form/ra_acceptance", len(missing_roles)))
+
+    # ------------------------------------------------------------ the client's specification
+    if spec:
+        aes_spec = [a for a in aes if a.kind == "spec_acceptance"]
+        tiles.append(_tile(G, "spec_acceptance", "Specification accepted and signed", "5(1)(b), spec p.26",
+                           "green" if any(a.status == "signed" for a in aes_spec) else "amber" if aes_spec else "red",
+                           "Signed." if any(a.status == "signed" for a in aes_spec) else
+                           "Issued, waiting for signatures." if aes_spec else
+                           "Issue the acceptance page for signing: " + ", ".join((spec.get("acceptance_signatories") or [])[:4]),
+                           "consultant"))
+        cov = (cfg.get("coverage") or {}).get("results") or []
+        if spec.get("client_hazards"):
+            miss = [c["hazard"] for c in cov if c["status"] == "missing"]
+            part = [c["hazard"] for c in cov if c["status"] == "partial"]
+            tiles.append(_tile(G, "client_hazards", "Client's hazards in the risk assessment", "spec 2.9.18",
+                               "amber" if not cov else "red" if miss else "amber" if part else "green",
+                               "Not checked yet." if not cov else
+                               (f"{len(miss)} not covered: " + "; ".join(miss[:3])) if miss else
+                               (f"{len(part)} only partly covered: " + "; ".join(part[:3])) if part else
+                               f"All {len(cov)} client hazards covered.", "consultant", len(miss)))
+        talks_env = [r for r in talks if r.payload.get("environmental")]
+        need_env = freq.get("environmental_talks_min")
+        if need_env:
+            tiles.append(_tile(G, "env_talks", "Environmental toolbox talks", "spec 2.11.2.5",
+                               "green" if len(talks_env) >= need_env else "amber",
+                               f"{len(talks_env)} of at least {need_env} done.", "talk", need_env - len(talks_env)))
+
+        def due_tile(key, kind, title, reg, days, first_within=None, action=None):
+            if not days:
+                return
+            done = by_kind.get(kind, [])
+            last = done[-1].record_date if done else None
+            if last:
+                age_ = (today - last).days
+                stt = "red" if age_ > days else "amber" if age_ > days - 7 else "green"
+                det = f"Last on {last} ({age_} day(s) ago). Due every {days} days."
+            else:
+                due = started + timedelta(days=first_within or days)
+                stt = "red" if today > due else "amber"
+                det = f"None yet. First one due by {due}."
+            tiles.append(_tile(G, key, title, reg, stt, det, action or f"form/{kind}"))
+        due_tile("drill", "drill", "Evacuation drill", "ERW 9, spec 2.12.6", freq.get("evacuation_drill_days"),
+                 freq.get("first_drill_within_days"))
+        due_tile("meeting", "meeting", "H&S committee meeting", "OHS s19, spec 2.6.2", freq.get("committee_meeting_days"))
+        due_tile("observation", "observation", "Planned task observations", "spec 2.9.12", freq.get("observation_days") or 30)
+
+        issued = {(records_value(r, "worker") or {}).get("id") for r in by_kind.get("ppe_issue", [])}
+        no_ppe = [w.name for w in workers if w.id not in issued]
+        tiles.append(_tile(G, "ppe_issue", "PPE issue records", "GSR 2, spec 2.16.5",
+                           "red" if no_ppe else "green",
+                           (f"{len(no_ppe)} worker(s) without a PPE issue record: " + ", ".join(no_ppe[:3])) if no_ppe
+                           else "Every worker signed for their PPE.", "form/ppe_issue", len(no_ppe)))
+
+        if spec.get("permits"):
+            names = " ".join(x.get("activity", "").lower()
+                             for r in ts_today for t in r.payload.get("tasks", []) for x in t.get("risks", []))
+            names += " " + " ".join(t.get("description", "").lower() for r in ts_today for t in r.payload.get("tasks", []))
+            need_p = [p for p, words in library.PERMIT_TRIGGERS.items() if any(w in names for w in words)]
+            have_p = {records_value(r, "type") for r in by_kind.get("permit", []) if r.record_date == today}
+            closed = {(records_value(r, "permit") or {}).get("id") for r in by_kind.get("permit_close", [])}
+            open_old = [r for r in by_kind.get("permit", []) if r.id not in closed and r.record_date < today]
+            missing_p = [p for p in need_p if p not in have_p]
+            tiles.append(_tile(G, "permits", "Permits to work", "spec 2.10",
+                               "red" if missing_p else "amber" if open_old else "green",
+                               (f"Today's work needs a permit: {', '.join(missing_p)}.") if missing_p else
+                               (f"{len(open_old)} permit(s) from earlier days not closed.") if open_old else
+                               ("Permits in place for today's work." if need_p else "No permit work on today's task sheet."),
+                               "form/permit", len(missing_p)))
+
+        fac = spec.get("facilities") or {}
+        have_fac = cfg.get("facilities") or {}
+        if fac.get("toilet_per_workers") or fac.get("shower_per_workers"):
+            import math
+            n = len(workers)
+            need_t = math.ceil(n / fac["toilet_per_workers"]) if fac.get("toilet_per_workers") and n else 0
+            need_s = math.ceil(n / fac["shower_per_workers"]) if fac.get("shower_per_workers") and n else 0
+            if not have_fac:
+                stt, det = "amber", "Enter the number of toilets and showers in site setup."
+            else:
+                short = []
+                if have_fac.get("toilets", 0) < need_t:
+                    short.append(f"toilets {have_fac.get('toilets', 0)} of {need_t}")
+                if have_fac.get("showers", 0) < need_s:
+                    short.append(f"showers {have_fac.get('showers', 0)} of {need_s}")
+                stt = "red" if short else "green"
+                det = ("Too few: " + ", ".join(short) + f" for {n} workers.") if short else f"Enough for {n} workers."
+            tiles.append(_tile(G, "facilities", "Toilets and showers", "CR 30, Facilities Regs, spec 4.2", stt, det, "setup"))
 
     counts = {k: sum(t["status"] == k for t in tiles) for k in ("green", "amber", "red", "na")}
     return {"site_id": sid, "date": today.isoformat(), "tiles": tiles, "groups": GROUPS, "counts": counts,

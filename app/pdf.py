@@ -96,6 +96,13 @@ def _proof(rec) -> list:
                              f"record #{rec.seq} · hash {rec.hash[:16]}…", SMALL)]
 
 
+def _score(h: dict) -> str:
+    """'12 Significant → 9 Significant' when the consultant scored it, else L/M/H."""
+    if h.get("rating"):
+        return f"{h['rating']} {h.get('band', '')} → {h.get('rrating', '')} {h.get('rband', '')}".strip()
+    return h.get("risk", "")
+
+
 def _task_sheet(rec) -> list:
     p, out = rec.payload, []
     for i, t in enumerate(p.get("tasks", []), 1):
@@ -107,10 +114,10 @@ def _task_sheet(rec) -> list:
             spans.append(len(rows))
             rows.append([_p(r["activity"] + ("" if r.get("approved") else " (NOT APPROVED)"), H3), "", ""])
             for h in r.get("hazards", []):
-                rows.append([_p(h["hazard"]), _p(h.get("risk", "")),
-                             _p("\n".join("• " + c for c in h.get("controls", [])))])
+                rows.append([_p(h["hazard"] + (f"\n→ {h['consequence']}" if h.get("consequence") else "")),
+                             _p(_score(h)), _p("\n".join("• " + c for c in h.get("controls", [])))])
         if len(rows) > 1:
-            tb = Table(rows, colWidths=[55 * mm, 12 * mm, W - 67 * mm], repeatRows=1)
+            tb = Table(rows, colWidths=[55 * mm, 22 * mm, W - 77 * mm], repeatRows=1)
             tb.setStyle(GRID)
             tb.setStyle(TableStyle([c for i in spans for c in (
                 ("SPAN", (0, i), (-1, i)), ("BACKGROUND", (0, i), (-1, i), colors.HexColor("#f6f8fa")))]))
@@ -281,10 +288,32 @@ def _investigation(rec) -> list:
     return out
 
 
+def _fmt(v):
+    if v is None or v == "":
+        return "-"
+    if isinstance(v, bool):
+        return "Yes" if v else "No"
+    if isinstance(v, dict):
+        return v.get("name") or v.get("summary") or "-"
+    if isinstance(v, list):
+        return ", ".join(str(x) for x in v) or "-"
+    if isinstance(v, float) and v.is_integer():
+        return str(int(v))
+    return str(v)
+
+
+def _form(rec) -> list:
+    p = rec.payload
+    rows = [[_p(f["label"]), _p(_fmt(f["value"]))] for f in p.get("fields", [])]
+    t = Table(rows, colWidths=[60 * mm, W - 60 * mm])
+    t.setStyle(TableStyle([("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#c8ced6")), ("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    return [_p(f"{p.get('title', '')} · {p.get('reg', '')}", SMALL), t]
+
+
 BODIES = {"task_sheet": _task_sheet, "toolbox_talk": _toolbox_talk, "check": _check,
           "incident": _incident, "induction": _induction, "visitor": _visitor,
           "appointment": _appointment, "audit": _audit, "audit_ack": _audit_ack,
-          "investigation": _investigation}
+          "investigation": _investigation, **{k: _form for k in library.FORMS}}
 
 
 def verify_url(rec) -> str:
@@ -521,13 +550,14 @@ def _risks_flow(risks: list) -> list:
     out = []
     for r in risks:
         status = f"Approved by {r.approved_by} on {r.approved_at:%Y-%m-%d}" if r.approved_at else "NOT APPROVED"
-        rows = [["Hazard", "Risk", "Controls"]] + [
-            [_p(h["hazard"]), _p(h.get("risk", "")), _p("\n".join("• " + c for c in h.get("controls", [])))]
+        rows = [["Hazard → consequence", "Risk", "Controls", "Responsible"]] + [
+            [_p(h["hazard"] + (f"\n→ {h['consequence']}" if h.get("consequence") else "")), _p(_score(h)),
+             _p("\n".join("• " + c for c in h.get("controls", []))), _p(h.get("responsible", ""))]
             for h in r.hazards]
-        t = Table(rows, colWidths=[55 * mm, 12 * mm, W - 67 * mm], repeatRows=1)
+        t = Table(rows, colWidths=[50 * mm, 22 * mm, W - 102 * mm, 30 * mm], repeatRows=1)
         t.setStyle(GRID)
-        out.append(KeepTogether([_p(r.activity, H2), _p(status, P if r.approved_at else WARN), t,
-                                 _p("PPE: " + ", ".join(r.ppe), P)]))
+        out.append(KeepTogether([_p(r.activity + (f"  ({r.ref})" if r.ref else ""), H2),
+                                 _p(status, P if r.approved_at else WARN), t, _p("PPE: " + ", ".join(r.ppe), P)]))
     return out
 
 
@@ -567,7 +597,8 @@ def safety_file(company, site, *, date_from: date, date_to: date, docs: list, wo
         "subcontractors": _contractors_flow(list(contractors)),
         "inductions": ("induction", "visitor"), "task_sheets": ("task_sheet",), "toolbox_talks": ("toolbox_talk",),
         "inspections": ("check",), "incidents": ("incident", "investigation"),
-        "appointments": ("appointment",), "audits": ("audit", "audit_ack"),
+        "appointments": ("appointment", "ra_acceptance"), "audits": ("audit", "audit_ack"),
+        "registers": tuple(k for k in library.FORMS if k != "ra_acceptance"),
     }
     n_kinds = lambda a: sum(len(by_kind.get(k, [])) for k in a)
 

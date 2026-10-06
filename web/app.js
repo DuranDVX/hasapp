@@ -274,7 +274,8 @@ VIEWS.records = async (kind = "") => {
   if (online()) { try { list = await api(`/api/records?site_id=${S.siteId}&limit=150${kind ? "&kind=" + kind : ""}`); } catch {} }
   else if (kind) list = list.filter((r) => r.kind === kind);
   const kinds = { "": "All", task_sheet: "Task sheets", toolbox_talk: "Talks", check: "Checks", visitor: "Visitors",
-    incident: "Incidents", investigation: "Investigations", induction: "Inductions", appointment: "Appointments", audit: "Audits" };
+    incident: "Incidents", investigation: "Investigations", induction: "Inductions", appointment: "Appointments", audit: "Audits",
+    permit: "Permits", ppe_issue: "PPE issue", observation: "Observations", drill: "Drills", meeting: "Meetings" };
   render(`${head("Records", "Every signed record for this site. Tap one to see it, print it or check it.")}
     <div class="chips">${Object.entries(kinds).map(([k, v]) => `<button class="chip ${k === kind ? "on" : ""}" data-act="nav" data-to="records/${k}">${v}</button>`).join("")}</div>
     ${pend.length ? `<h2>Waiting to send</h2><div class="card"><ul class="plain">${pend.map((p) => `<li><div class="row between"><div class="grow"><b>${esc(p.label || p.body.kind)}</b>
@@ -338,6 +339,10 @@ VIEWS.record = async (id) => {
     body = `<div class="card"><b>Incident of ${esc(p.incident_date)}</b><p>${esc(p.findings)}</p>
       ${p.actions.map((a) => `<div class="small">• ${esc(a.action)} (${esc(a.owner)}, ${esc(a.due)})</div>`).join("")}
       <p class="small">${p.reportable ? `Reported to DEL ${esc(p.reported_dol.date)} (ref ${esc(p.reported_dol.ref)})` : "Not reportable: " + esc(p.not_reportable_reason)}</p></div>`;
+  } else if (S.data.forms[r.kind]) {
+    const fmt = (v) => v == null || v === "" ? "-" : v === true ? "Yes" : v === false ? "No" : Array.isArray(v) ? v.join(", ") : typeof v === "object" ? (v.name || v.summary || "-") : v;
+    body = `<div class="card"><table class="simple">${p.fields.map((f) => `<tr><td class="muted">${esc(f.label)}</td><td>${esc(fmt(f.value))}</td></tr>`).join("")}</table>
+      <p class="muted small">${esc(p.reg)}</p></div>`;
   } else if (r.kind === "audit_ack") {
     body = `<div class="card">Report of the audit of ${esc(p.audit_date)} received.</div>`;
   }
@@ -444,6 +449,7 @@ VIEWS.more = () => {
   const dark = (ls.get("ss-theme") || "light") === "dark";
   render(`${head("More", `${esc(u.name)} · ${esc(u.role_label)} · ${esc(S.me.company.name)}`)}
     <h2>This site</h2>
+    ${item("consultant", "📑", "Client documents", "Consultant's risk assessment and the client's specification")}
     ${item("setup", "⚙️", "Site setup", "What the site has: excavations, scaffolds, plant…", can.manage())}
     ${item("appointments", "📜", "Legal appointments", "Construction manager, supervisors, operators…")}
     ${item("aes", "✍️", "Documents for signing", "Advanced e-signature or wet ink")}

@@ -78,6 +78,7 @@ class Site(Base):
     status: Mapped[str] = mapped_column(String(20), default="active")   # active | closed
     features: Mapped[dict] = mapped_column(JSON, default=dict)          # library.SITE_FEATURES -> bool
     print_required: Mapped[bool] = mapped_column(Boolean, default=False)  # client wants paper copies
+    settings: Mapped[dict] = mapped_column(JSON, default=dict)   # spec, ra_only, facilities
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -182,7 +183,8 @@ class RiskItem(Base):
     activity: Mapped[str] = mapped_column(String(200))
     hazards: Mapped[list] = mapped_column(JSON, default=list)   # [{hazard, risk, controls: []}]
     ppe: Mapped[list] = mapped_column(JSON, default=list)
-    source: Mapped[str] = mapped_column(String(20), default="manual")   # starter | ai_draft | manual
+    source: Mapped[str] = mapped_column(String(20), default="manual")   # starter | ai_draft | manual | consultant_ra
+    ref: Mapped[str] = mapped_column(String(200), default="")             # e.g. "RA 1 rev 00 · item 5"
     approved_by: Mapped[str] = mapped_column(String(200), default="")   # name + SACPCMP number
     approved_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -305,7 +307,7 @@ def _add_missing_columns() -> None:
                     default = f" DEFAULT {d}"
                 elif isinstance(d, str):
                     default = " DEFAULT '" + d.replace("'", "''") + "'"
-                elif col.name in ("features",):
+                elif col.name in ("features", "settings"):
                     default = " DEFAULT '{}'"
                 elif col.name in ("signers", "signatures"):
                     default = " DEFAULT '[]'"

@@ -18,7 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from . import aes, ai, auth, compliance, config, db, files, library, mailer, pdf, records, stt, tts
+from . import aes, ai, auth, compliance, config, consultant, db, files, library, mailer, pdf, records, stt, tts
 from .auth import Ctx, current
 
 logging.basicConfig(level=logging.INFO)
@@ -162,6 +162,14 @@ def _audio_text(ctx: Ctx, audio: UploadFile | None, text: str) -> tuple[str, dic
     return (spoken + ("\n" + text.strip() if text.strip() else ""))[:6000], ref
 
 
+def site_risks_q(cid: str, site: db.Site):
+    """Risk items that apply to a site. With "ra_only", only the site's own (consultant) items."""
+    q = select(db.RiskItem).where(db.RiskItem.company_id == cid, db.RiskItem.active)
+    if (site.settings or {}).get("ra_only"):
+        return q.where(db.RiskItem.site_id == site.id)
+    return q.where((db.RiskItem.site_id.is_(None)) | (db.RiskItem.site_id == site.id))
+
+
 # ---------------------------------------------------------------- serialisers
 
 def user_d(u: db.User) -> dict:
@@ -180,7 +188,10 @@ def site_d(x: db.Site) -> dict:
             "client_agent": x.client_agent, "emergency": x.emergency,
             "start_date": x.start_date.isoformat() if x.start_date else "",
             "end_date": x.end_date.isoformat() if x.end_date else "", "status": x.status,
-            "features": x.features or {}, "print_required": bool(x.print_required)}
+            "features": x.features or {}, "print_required": bool(x.print_required),
+            "ra_only": bool((x.settings or {}).get("ra_only")),
+            "facilities": (x.settings or {}).get("facilities") or {},
+            "has_spec": bool((x.settings or {}).get("spec")), "has_ra": bool((x.settings or {}).get("ra"))}
 
 
 def contractor_d(c: db.Contractor) -> dict:
@@ -226,7 +237,7 @@ def worker_d(w: db.Worker, ctx: Ctx, inducted: bool | None = None) -> dict:
 
 def risk_d(r: db.RiskItem) -> dict:
     return {"id": r.id, "site_id": r.site_id, "activity": r.activity, "hazards": r.hazards, "ppe": r.ppe,
-            "source": r.source, "approved": r.approved_at is not None, "approved_by": r.approved_by,
+            "source": r.source, "ref": r.ref, "approved": r.approved_at is not None, "approved_by": r.approved_by,
             "approved_at": r.approved_at.date().isoformat() if r.approved_at else "", "active": r.active}
 
 
@@ -418,6 +429,12 @@ def _site_fields(x: db.Site, body: dict) -> None:
         x.features = {k: bool(v) for k, v in body["features"].items() if k in library.SITE_FEATURES}
     if "print_required" in body:
         x.print_required = bool(body["print_required"])
+    if isinstance(body.get("facilities"), dict):
+        fac = {k: max(0, min(500, int(v))) for k, v in body["facilities"].items()
+               if k in ("toilets", "showers") and str(v).isdigit()}
+        x.settings = {**(x.settings or {}), "facilities": fac}
+    if "ra_only" in body:
+        x.settings = {**(x.settings or {}), "ra_only": bool(body["ra_only"])}
     if not x.name:
         raise HTTPException(400, "The site needs a name.")
 
@@ -576,9 +593,10 @@ def _risk_fields(r: db.RiskItem, body: dict) -> None:
 @app.get("/api/risks")
 def list_risks(site_id: str = "", ctx: Ctx = Depends(current)):
     with db.session() as s:
-        q = select(db.RiskItem).where(db.RiskItem.company_id == ctx.cid, db.RiskItem.active)
-        q = q.where((db.RiskItem.site_id.is_(None)) | (db.RiskItem.site_id == site_id)) if site_id \
-            else q
+        if site_id:
+            q = site_risks_q(ctx.cid, _get(s, db.Site, site_id, ctx, "Site"))
+        else:
+            q = select(db.RiskItem).where(db.RiskItem.company_id == ctx.cid, db.RiskItem.active)
         return [risk_d(r) for r in s.scalars(q.order_by(db.RiskItem.activity))]
 
 
@@ -768,9 +786,7 @@ def sync(site_id: str, ctx: Ctx = Depends(current)):
              .where(db.SiteWorker.site_id == site.id, db.Worker.active)
              .options(selectinload(db.Worker.credentials)).order_by(db.Worker.name))
         workers = [worker_d(w, ctx, w.id in ind) for w in s.scalars(q)]
-        risks = s.scalars(select(db.RiskItem).where(
-            db.RiskItem.company_id == ctx.cid, db.RiskItem.active,
-            (db.RiskItem.site_id.is_(None)) | (db.RiskItem.site_id == site.id)).order_by(db.RiskItem.activity))
+        risks = s.scalars(site_risks_q(ctx.cid, site).order_by(db.RiskItem.ref, db.RiskItem.activity))
         plant = s.scalars(select(db.Plant).where(db.Plant.company_id == ctx.cid, db.Plant.active,
                                                  (db.Plant.site_id == site.id) | (db.Plant.site_id.is_(None)))
                           .order_by(db.Plant.name))
@@ -793,6 +809,9 @@ def sync(site_id: str, ctx: Ctx = Depends(current)):
                 "visitor_ppe": library.VISITOR_PPE, "visitor_rules": library.VISITOR_RULES,
                 "audit_items": library.AUDIT_ITEMS, "aes_kinds": library.AES_DOCS,
                 "worker_consent": library.WORKER_CONSENT, "inspection_schedule": library.INSPECTION_SCHEDULE,
+                "forms": library.FORMS, "ra_roles": ((site.settings or {}).get("ra") or {}).get("roles", []),
+                "matrix": {"consequence": library.CONSEQUENCE, "likelihood": library.LIKELIHOOD},
+                "spec_rules": [r["rule"] for r in (((site.settings or {}).get("spec") or {}).get("key_rules") or [])],
                 "esign_accepted": bool(ctx.company.esign_accepted_at),
                 "required_appointments": [k for k, f in library.REQUIRED_APPOINTMENTS
                                           if f is None or (site.features or {}).get(f)],
@@ -1116,6 +1135,7 @@ PRINT_PACKS = {
     "induction": "Inductions (full records)", "check": "Checks and inspections (full records)",
     "induction_register": "Induction register", "visitor_register": "Visitor register",
     "check_register": "Plant and inspection register",
+    **{k: v["title"] + "s" for k, v in library.FORMS.items()},
 }
 
 
@@ -1261,6 +1281,172 @@ def audit_prefill(site_id: str, ctx: Ctx = Depends(current)):
             "report_due": (today() + timedelta(days=7)).isoformat()}
 
 
+# ---------------------------------------------------------------- consultant documents (RA, spec)
+
+def _settings(site: db.Site, **kw) -> None:
+    site.settings = {**(site.settings or {}), **kw}
+
+
+def _store_upload(ctx: Ctx, body: dict) -> tuple[str, bytes, str]:
+    if not body.get("file"):
+        raise HTTPException(400, "Choose the file.")
+    try:
+        name = files.put_data_url(ctx.cid, body["file"])
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return name, files.read(name), _s(body.get("filename"), 200) or name.rsplit("/", 1)[-1]
+
+
+@app.get("/api/consultant")
+def consultant_status(site_id: str, ctx: Ctx = Depends(current)):
+    with db.session() as s:
+        site = _get(s, db.Site, site_id, ctx, "Site")
+        st = site.settings or {}
+        ra, spec = st.get("ra"), st.get("spec")
+        return {"ra": ra and {k: ra[k] for k in ("header", "flags", "imported_at", "imported_by", "roles", "file", "approved")}
+                      | {"file_url": files.sign(ra["file"])},
+                "spec": spec and (spec | {"file_url": files.sign(spec.get("file", ""))}),
+                "coverage": st.get("coverage"), "ra_only": bool(st.get("ra_only"))}
+
+
+@app.post("/api/consultant/ra/preview")
+def ra_preview(body: dict = Body(...), ctx: Ctx = Depends(current)):
+    ctx.need(*auth.MANAGE)
+    _limit(ctx)
+    name, data, label = _store_upload(ctx, body)
+    ra = _ai(ai.ra_extract, label if "." in label else name, data)
+    sig = aes.inspect(data) if name.endswith(".pdf") else None
+    with db.session() as s:
+        site = _get(s, db.Site, body.get("site_id", ""), ctx, "Site")
+        flags = consultant.ra_check(ra, sig, (site.settings or {}).get("spec"), today())
+        items = consultant.ra_items(ra)
+        _settings(site, ra_pending={"file": name, "ra": ra, "flags": flags})
+    return {"header": ra.get("header", {}), "items": items, "flags": flags,
+            "roles": consultant.ra_roles(items)}
+
+
+def _coverage(s, ctx: Ctx, site: db.Site) -> None:
+    spec = (site.settings or {}).get("spec") or {}
+    hazards = spec.get("client_hazards") or []
+    items = [risk_d(r) for r in s.scalars(site_risks_q(ctx.cid, site))]
+    if not hazards or not items:
+        return
+    try:
+        res = ai.hazard_coverage(hazards, items)
+        _settings(site, coverage={"results": res["results"], "at": db.utcnow().isoformat(timespec="seconds")})
+    except Exception:
+        log.exception("coverage check failed")
+
+
+@app.post("/api/consultant/ra/confirm")
+def ra_confirm(body: dict = Body(...), ctx: Ctx = Depends(current)):
+    """Load the previewed risk assessment into the site's library."""
+    ctx.need(*auth.MANAGE)
+    with db.session() as s:
+        site = _get(s, db.Site, body.get("site_id", ""), ctx, "Site")
+        pend = (site.settings or {}).get("ra_pending")
+        if not pend:
+            raise HTTPException(400, "Upload the risk assessment again.")
+        ra, h = pend["ra"], pend["ra"].get("header", {})
+        approve = bool(body.get("approve"))
+        team = ", ".join(f"{t.get('name', '')} ({t.get('title', '')})" for t in h.get("team", [])) or "the consultant"
+        for old in s.scalars(select(db.RiskItem).where(db.RiskItem.site_id == site.id,
+                                                       db.RiskItem.source == "consultant_ra", db.RiskItem.active)):
+            old.active = False   # a new revision replaces the old one; records keep their copies
+        items = consultant.ra_items(ra)
+        for it in items:
+            r = db.RiskItem(company_id=ctx.cid, site_id=site.id, activity=it["activity"] or "Activity",
+                            hazards=it["hazards"], ppe=it["ppe"], source="consultant_ra", ref=it["ref"])
+            if approve:
+                r.approved_at = db.utcnow()
+                r.approved_by = (f"{team}: signed risk assessment {it['ref'].split(' · ')[0]} "
+                                 f"({h.get('date') or ''}); loaded by {ctx.user.name}")
+            s.add(r)
+        title = f"Baseline risk assessment {h.get('ra_no') or ''} {h.get('description') or ''} ({h.get('date') or ''})".strip()
+        s.add(db.Doc(company_id=ctx.cid, site_id=site.id, section="risk_assessments", title=title[:200],
+                     file=pend["file"], uploaded_by=ctx.user.name))
+        st = dict(site.settings or {})
+        st.pop("ra_pending", None)
+        st["ra"] = {"file": pend["file"], "header": h, "flags": pend["flags"], "roles": consultant.ra_roles(items),
+                    "imported_at": db.utcnow().isoformat(timespec="seconds"), "imported_by": ctx.user.name,
+                    "approved": approve}
+        st["ra_only"] = bool(body.get("ra_only", True))
+        site.settings = st
+        s.flush()
+        _coverage(s, ctx, site)
+        return {"ok": True, "items": len(items)}
+
+
+@app.post("/api/consultant/spec/preview")
+def spec_preview(body: dict = Body(...), ctx: Ctx = Depends(current)):
+    ctx.need(*auth.MANAGE)
+    _limit(ctx)
+    name, data, label = _store_upload(ctx, body)
+    raw = _ai(ai.spec_extract, label if "." in label else name, data, list(library.APPOINTMENTS),
+              [x["key"] for x in library.FILE_SECTIONS], list(library.CHECKLISTS))
+    spec = consultant.spec_clean(raw)
+    with db.session() as s:
+        site = _get(s, db.Site, body.get("site_id", ""), ctx, "Site")
+        _settings(site, spec_pending={"file": name, "spec": spec})
+    return spec
+
+
+@app.post("/api/consultant/spec/confirm")
+def spec_confirm(body: dict = Body(...), ctx: Ctx = Depends(current)):
+    ctx.need(*auth.MANAGE)
+    with db.session() as s:
+        site = _get(s, db.Site, body.get("site_id", ""), ctx, "Site")
+        pend = (site.settings or {}).get("spec_pending")
+        if not pend:
+            raise HTTPException(400, "Upload the specification again.")
+        spec = pend["spec"] | {"file": pend["file"], "imported_at": db.utcnow().isoformat(timespec="seconds"),
+                               "imported_by": ctx.user.name}
+        s.add(db.Doc(company_id=ctx.cid, site_id=site.id, section="client_spec",
+                     title=f"Client H&S specification: {spec.get('project') or site.name} ({spec.get('date') or ''})"[:200],
+                     file=pend["file"], uploaded_by=ctx.user.name))
+        st = dict(site.settings or {})
+        st.pop("spec_pending", None)
+        st["spec"] = spec
+        site.settings = st
+        s.flush()
+        _coverage(s, ctx, site)
+        return {"ok": True}
+
+
+@app.post("/api/consultant/coverage")
+def recheck_coverage(body: dict = Body(...), ctx: Ctx = Depends(current)):
+    ctx.need(*auth.MANAGE)
+    _limit(ctx)
+    with db.session() as s:
+        site = _get(s, db.Site, body.get("site_id", ""), ctx, "Site")
+        _coverage(s, ctx, site)
+        return (site.settings or {}).get("coverage") or {}
+
+
+@app.post("/api/consultant/spec/acceptance")
+def spec_acceptance(body: dict = Body(default={}), ctx: Ctx = Depends(current)):
+    """Issue the specification's acceptance page for AES / wet-ink signatures."""
+    ctx.need(*auth.MANAGE)
+    with db.session() as s:
+        site = _get(s, db.Site, body.get("site_id", ""), ctx, "Site")
+        spec = (site.settings or {}).get("spec")
+        if not spec:
+            raise HTTPException(400, "Load the client's specification first.")
+        signers = spec.get("acceptance_signatories") or ["Principal contractor (CEO / s16(2))",
+                                                         "Construction manager (CR 8(1))", "Safety officer", "Client"]
+        a = db.AesDoc(id=db.new_id(), company_id=ctx.cid, site_id=site.id, kind="spec_acceptance",
+                      title=f"Acceptance of the H&S specification: {spec.get('project') or site.name}", signers=signers)
+        text = (f"We, the undersigned, received and accept the client's construction health and safety specification for "
+                f"{spec.get('project') or site.name}, dated {spec.get('date') or '-'}, prepared by {spec.get('author') or '-'} "
+                f"in terms of Construction Regulation 5(1)(b). The principal contractor's health and safety plan is based "
+                f"on it, and its requirements form part of every contract with our contractors.")
+        a.original_file = files.put(ctx.cid, pdf.aes_document(ctx.company, site, a.title, pdf.text_body(text), signers, a.id),
+                                    "application/pdf")
+        s.add(a)
+        s.flush()
+        return aes_d(a)
+
+
 @app.get("/api/verify")
 def verify(ctx: Ctx = Depends(current)):
     return records.verify(ctx.cid)
@@ -1280,9 +1466,7 @@ def safety_file(sid: str, date_from: str = "", date_to: str = "", ctx: Ctx = Dep
         workers = s.scalars(select(db.Worker).join(db.SiteWorker, db.SiteWorker.worker_id == db.Worker.id)
                             .where(db.SiteWorker.site_id == site.id)
                             .options(selectinload(db.Worker.credentials)).order_by(db.Worker.name)).all()
-        risks = s.scalars(select(db.RiskItem).where(
-            db.RiskItem.company_id == ctx.cid, db.RiskItem.active,
-            (db.RiskItem.site_id.is_(None)) | (db.RiskItem.site_id == site.id)).order_by(db.RiskItem.activity)).all()
+        risks = s.scalars(site_risks_q(ctx.cid, site).order_by(db.RiskItem.ref, db.RiskItem.activity)).all()
         recs = s.scalars(select(db.Record).where(db.Record.site_id == site.id, db.Record.record_date >= d0,
                                                  db.Record.record_date <= d1)
                          .options(selectinload(db.Record.signatures))).all()
@@ -1303,9 +1487,7 @@ def safety_file(sid: str, date_from: str = "", date_to: str = "", ctx: Ctx = Dep
 
 def _site_context(s, ctx: Ctx, site_id: str):
     site = _get(s, db.Site, site_id, ctx, "Site")
-    risks = [risk_d(r) for r in s.scalars(select(db.RiskItem).where(
-        db.RiskItem.company_id == ctx.cid, db.RiskItem.active,
-        (db.RiskItem.site_id.is_(None)) | (db.RiskItem.site_id == site.id)))]
+    risks = [risk_d(r) for r in s.scalars(site_risks_q(ctx.cid, site))]
     workers = [{"id": w.id, "name": w.name, "trade": w.trade, "employer": w.employer} for w in s.scalars(
         select(db.Worker).join(db.SiteWorker, db.SiteWorker.worker_id == db.Worker.id)
         .where(db.SiteWorker.site_id == site.id, db.Worker.active))]

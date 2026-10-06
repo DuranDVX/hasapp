@@ -17,9 +17,13 @@ async function finishRecord(kind, payload, signatures, extra = {}) {
   if (online()) { await flush(); loadSite(true).then(refreshIfIdle); } else flush();
   toast(online() ? "Saved. Sending now." : "Saved on this device. It sends when the signal comes back.", "ok");
 }
+const BAND_C = { Low: "green", Medium: "amber", Significant: "red", High: "red" };
+function scoreHtml(h) {
+  return h.rating ? ` <span class="badge ${BAND_C[h.band] || ""}">${h.rating} ${esc(h.band || "")}</span> → <span class="badge ${BAND_C[h.rband] || ""}">${h.rrating} ${esc(h.rband || "")}</span>` : "";
+}
 function hazardHtml(ids) {
   return ids.map(risk).filter(Boolean).map((r) => `<div class="hazard"><b>${esc(r.activity)}</b>${r.approved ? "" : ' <span class="badge warn">Not approved</span>'}
-    ${r.hazards.map((h) => `<div>• ${esc(h.hazard)}<div class="muted small">${h.controls.map(esc).join("; ")}</div></div>`).join("")}
+    ${r.hazards.map((h) => `<div>• ${esc(h.hazard)}${scoreHtml(h)}${h.consequence ? `<div class="small"><i>${esc(h.consequence)}</i></div>` : ""}<div class="muted small">${h.controls.map(esc).join("; ")}</div></div>`).join("")}
     <div class="small"><b>PPE:</b> ${esc(r.ppe.join(", "))}</div></div>`).join("");
 }
 function riskOptions(exclude = []) {
@@ -65,7 +69,7 @@ VIEWS.task = async () => {
   return taskReview(d);
 };
 function taskVoice() {
-  render(`<h1>Daily task sheet</h1>${steps(1, 3)}
+  render(`${head("Daily task sheet (DSTI)", "Brief the workers on today's tasks, hazards and PPE; they sign before work.", "board")}${steps(1, 3)}
     ${micBlock("Say what each team does today, where, and with which machines.<br><i>“Sipho and his team: brickwork on the east wall from the scaffold. Johan digs the trench for the sewer with the TLB.”</i>")}
     <details class="card"><summary>Type it instead</summary><textarea id="t-text" placeholder="Type today's work"></textarea>
       <button class="dark" data-act="task-text">Use this text</button></details>
@@ -211,6 +215,7 @@ function talkPrepare(d) {
     <div class="chips">${d.risk_item_ids.map((id) => { const r = risk(id); return r ? `<button class="chip on" data-act="talk-risk-off" data-id="${id}">${esc(r.activity)} ✕</button>` : ""; }).join("")}</div>
     <select data-act-change="talk-risk-add">${riskOptions(d.risk_item_ids)}</select>
     <label>Or a topic</label><input id="tk-topic" value="${esc(d.topic)}" placeholder="Working at height on the scaffold">
+    <label class="check"><input type="checkbox" id="tk-env" ${d.environmental ? "checked" : ""}> This is an environmental talk (waste, spills, dust, noise)</label>
     <button class="primary" data-act="talk-ai">✨ Write the talk for me</button>
     <button data-act="talk-own">I will give my own talk</button>`);
   $("#view").onchange = async (e) => {
@@ -221,7 +226,7 @@ async function withTalk(fn) { const d = await IDB.get(draftKey("talk")); fn(d); 
 ACT["talk-risk-off"] = (el) => withTalk((d) => toggle(d.risk_item_ids, el.dataset.id));
 ACT["talk-ai"] = async (btn) => {
   const d = await IDB.get(draftKey("talk"));
-  d.language = $("#tk-lang").value; d.topic = $("#tk-topic").value.trim();
+  d.language = $("#tk-lang").value; d.topic = $("#tk-topic").value.trim(); d.environmental = $("#tk-env").checked;
   if (!online()) { toast("The AI needs a signal. Give your own talk instead.", "bad"); return; }
   await busy(btn, "Writing the talk…", async () => {
     const r = await api("/api/ai/toolbox-talk", { json: { site_id: S.siteId, language: d.language, topic: d.topic, risk_item_ids: d.risk_item_ids }, timeout: 120000 });
@@ -231,7 +236,7 @@ ACT["talk-ai"] = async (btn) => {
 };
 ACT["talk-own"] = async () => {
   const d = (await IDB.get(draftKey("talk"))) || { client_id: newId(), risk_item_ids: [], signatures: {}, absent: [] };
-  d.language = $("#tk-lang").value; d.topic = $("#tk-topic").value.trim();
+  d.language = $("#tk-lang").value; d.topic = $("#tk-topic").value.trim(); d.environmental = $("#tk-env").checked;
   Object.assign(d, { title: d.topic || "Toolbox talk", text: "", text_en: "", key_points: [], questions: [], ai_translated: false, step: "talk", own: true });
   await saveDraft("talk", d); talkShow(d);
 };
@@ -299,7 +304,8 @@ ACT["talk-finish"] = async (btn) => {
   btn.disabled = true;
   const sigs = S.data.workers.filter((w) => d.signatures[w.id]).map((w) => d.signatures[w.id]).concat([d.signatures["user:" + me().id]]);
   await finishRecord("toolbox_talk", { topic: d.topic, title: d.title, language: d.language, text: d.text, text_en: d.text_en,
-    key_points: d.key_points, questions: d.questions, ai_translated: d.ai_translated, group_photo: d.group_photo }, sigs,
+    key_points: d.key_points, questions: d.questions, ai_translated: d.ai_translated, group_photo: d.group_photo,
+    environmental: !!d.environmental }, sigs,
     { client_id: d.client_id, label: "Toolbox talk: " + d.title });
   await dropDraft("talk"); go("board");
 };
