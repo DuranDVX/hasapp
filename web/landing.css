@@ -224,3 +224,15 @@ body {
   box-shadow: 0 10px 30px rgba(18,36,51,.07); }
 .example-vs { color: var(--muted); }
 .example-vs b { color: #a3221a; text-decoration: line-through; }
+
+/* no single word left alone on a line */
+h1, h2, h3 { text-wrap: balance; }
+.lead, .sub, .feat p, .step p { text-wrap: pretty; }
+
+/* hours -> seconds */
+.punch { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: -8px 0 32px;
+  font-size: clamp(20px, 2.6vw, 26px); font-weight: 800; letter-spacing: -.4px; }
+.punch .was { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 2px; font-weight: 700; }
+.punch .arrow { color: var(--accent); }
+.punch .now { color: #fff; background: var(--accent-dk); padding: 6px 14px; border-radius: 12px;
+  box-shadow: 0 8px 22px rgba(242,107,29,.28); }
