@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /app
+Disallow: /app.html
+Disallow: /admin.html
+Disallow: /api/
+Disallow: /v/
+Sitemap: https://www.sitebakkie.co.za/sitemap.xml

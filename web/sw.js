@@ -1,7 +1,7 @@
 // SiteBakkie service worker: the app shell works with no signal.
 // App files: network first (a deploy shows at once), cache after 3 s or offline.
 // API calls are never cached here; the app keeps its own offline data in IndexedDB.
-const CACHE = "sitebakkie-v6";
+const CACHE = "sitebakkie-v7";
 const SHELL = ["/app.html", "/style.css", "/idb.js", "/sign.js", "/app.js", "/forms.js", "/manage.js", "/board.js", "/registers.js", "/consultant.js",
   "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/logo-head.png", "/mark-head.png"];
 
@@ -18,7 +18,7 @@ self.addEventListener("fetch", (e) => {
   if (req.method !== "GET" || url.origin !== location.origin || url.pathname.startsWith("/api/")) return;
   if (url.pathname.startsWith("/p/")) return;   // QR redirects
   e.respondWith((async () => {
-    const key = new Request(url.origin + (url.pathname === "/" ? "/app.html" : url.pathname));
+    const key = new Request(url.origin + url.pathname);
     const cached = () => caches.match(key);
     const net = fetch(req, { cache: "no-cache" }).then((r) => {
       if (r.ok && r.type === "basic") { const copy = r.clone(); caches.open(CACHE).then((c) => c.put(key, copy)); }

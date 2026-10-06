@@ -1887,8 +1887,8 @@ def admin_update_user(uid: str, body: dict = Body(...)):
 
 # ---------------------------------------------------------------- static PWA
 
-@app.get("/", include_in_schema=False)
-def root():
+@app.get("/app", include_in_schema=False)
+def app_short():
     return RedirectResponse("/app.html")
 
 
