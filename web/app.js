@@ -172,7 +172,8 @@ document.addEventListener("click", (e) => {
 // ---------------------------------------------------------------- login / signup
 
 VIEWS.login = () => {
-  render(`<h1>Log in</h1><p class="muted">Site health and safety, without the paper.</p>
+  render(`<img src="/logo.png" alt="SiteBakkie" style="width:min(320px,85%);display:block;margin:18px 0 6px">
+    <p class="muted">Site health and safety, without the paper. From the makers of <a href="https://www.quotebakkie.co.za" target="_blank">QuoteBakkie</a>.</p>
     <div class="card"><label>Email</label><input id="l-email" type="email" autocomplete="username">
     <label>Password</label><input id="l-pw" type="password" autocomplete="current-password">
     <button class="primary" data-act="login">Log in</button></div>
@@ -466,6 +467,8 @@ VIEWS.more = () => {
     ${item("profile", "👤", "My profile and password")}
     <div class="card"><label class="check"><input type="checkbox" data-act-change="theme" ${dark ? "checked" : ""}> Dark screen (for indoors)</label></div>
     <button data-act="logout">Log out</button>
+    <div class="card tap" onclick="window.open('https://www.quotebakkie.co.za','_blank')"><div class="ico">🛻</div>
+      <div class="grow"><b>QuoteBakkie</b><div class="muted small">Quotes and invoices by voice, from the same team</div></div><span>›</span></div>
     <p class="muted small center"><a href="/privacy.html" target="_blank">Privacy</a> · <a href="/terms.html" target="_blank">Terms</a> · ${esc(S.me.app_name)} pilot</p>`);
   $("#view").onchange = (e) => {
     if (e.target.dataset.actChange === "theme") { const t = e.target.checked ? "dark" : "light"; ls.set("ss-theme", t); document.documentElement.dataset.theme = t; }

@@ -18,7 +18,7 @@ def _load_dotenv() -> None:
 
 _load_dotenv()
 
-APP_NAME = os.getenv("HAS_APP_NAME", "SiteSafe")   # working name, change in one place
+APP_NAME = os.getenv("HAS_APP_NAME", "SiteBakkie")   # sister app of QuoteBakkie
 WEB = ROOT / "web"
 DATA = Path(os.getenv("HAS_DATA", ROOT / "data"))
 FILES = DATA / "files"

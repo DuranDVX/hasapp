@@ -1,4 +1,6 @@
-# SiteSafe (working name)
+# SiteBakkie
+
+Sister app of QuoteBakkie: QuoteBakkie quotes the job, SiteBakkie keeps the site safe and legal.
 
 Construction site health and safety for South African builders, without the paper.
 

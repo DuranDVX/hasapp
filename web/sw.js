@@ -1,9 +1,9 @@
-// SiteSafe service worker: the app shell works with no signal.
+// SiteBakkie service worker: the app shell works with no signal.
 // App files: network first (a deploy shows at once), cache after 3 s or offline.
 // API calls are never cached here; the app keeps its own offline data in IndexedDB.
-const CACHE = "sitesafe-v3";
+const CACHE = "sitebakkie-v5";
 const SHELL = ["/app.html", "/style.css", "/idb.js", "/sign.js", "/app.js", "/forms.js", "/manage.js", "/board.js", "/registers.js", "/consultant.js",
-  "/manifest.webmanifest", "/icon-192.png", "/icon-512.png"];
+  "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/logo-head.png", "/mark-head.png"];
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)));
