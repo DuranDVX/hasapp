@@ -962,13 +962,20 @@ def _plan_data_flow(key: str, data: dict, company) -> list:
                      ("Client's agent", st["client_agent"]), ("Principal contractor", company.name),
                      ("Contract period", f"{st['start_date'] or '[to complete]'} to {st['end_date'] or '[to complete]'}"),
                      ("Client H&S specification", " · ".join(x for x in (sp.get("project"), sp.get("author"), sp.get("date")) if x)
-                      or "[to complete: load the client's specification]"),
+                      or ("[to complete: load the client's specification]" if data["client_spec_provided"]
+                          else "None provided for this site")),
+                     ("Scope of work", st["scope_of_work"] or "[to complete]"),
                      ("H&S consultant", cons), ("Work on this site", ", ".join(st["work_types"])),
                      ("Contractors", ", ".join(c["name"] for c in data["contractors"])),
                      ("Workers on the register", str(st["workers_on_register"]))])]
     if key == "legal":
-        laws = library.HS_PLAN_LAWS + [f"The client's health and safety specification ({sp.get('author') or 'author'}, "
-                                       f"{sp.get('date') or 'date'})" if sp else "The client's health and safety specification"]
+        laws = list(library.HS_PLAN_LAWS)
+        if data.get("asbestos"):
+            laws.append("Asbestos Abatement Regulations, 2020")
+        if sp:
+            laws.append(f"The client's health and safety specification ({sp.get('author') or 'author'}, {sp.get('date') or 'date'})")
+        elif data["client_spec_provided"]:
+            laws.append("The client's health and safety specification [to complete]")
         if any("Scaffold" in w for w in st["work_types"]):
             laws.append("SANS 10085-1: the design, erection, use and inspection of access scaffolding")
         return [_p("This plan complies with, and must be read with:")] + _bullets(laws)
@@ -993,8 +1000,13 @@ def _plan_data_flow(key: str, data: dict, company) -> list:
     if key == "ppe":
         return [_p("Minimum PPE on site", H3)] + _bullets(data["ppe_minimum"])
     if key == "emergency":
-        return [_p("Emergency details", H3), _p(st["emergency_details"] or "[to complete: hospital, ambulance, fire, police "
-                                                                              "and site emergency numbers]")]
+        out = [_p("Emergency details", H3), _p(st["emergency_details"] or "[to complete: hospital, ambulance, fire, police "
+                                                                             "and site emergency numbers]")]
+        if st["contacts"]:
+            out += [_p("Site contacts", H3), _table(["Role", "Name", "Phone"],
+                                                    [[c.get("role"), c.get("name"), c.get("phone")] for c in st["contacts"]],
+                                                    [55 * mm, 70 * mm, W - 125 * mm])]
+        return out
     if key == "records":
         return [_p("Sections of the H&S file", H3)] + _bullets(data["registers"])
     return []
@@ -1024,10 +1036,13 @@ def hs_plan(company, site, text: dict, data: dict, signers: list, ref: str, draf
              ("Version", f"{version} · {data['today']}"), ("Status", "DRAFT for review" if draft else "Issued for signature"),
              ("Document", ref)]),
         Spacer(1, 8 * mm),
-        _p("Prepared in terms of Construction Regulation 7(1)(a) of the Construction Regulations, 2014, and based on the "
-           f"client's health and safety specification{' by ' + sp['author'] if sp.get('author') else ''}"
-           f"{' dated ' + sp['date'] if sp.get('date') else ''}. A competent person reviews this plan before it is issued, "
-           "and the client approves it before work starts (CR 5(1)(l))."),
+        _p("Prepared in terms of Construction Regulation 7(1)(a) of the Construction Regulations, 2014, "
+           + (f"and based on the client's health and safety specification{' by ' + sp['author'] if sp.get('author') else ''}"
+              f"{' dated ' + sp['date'] if sp.get('date') else ''}. " if sp or data["client_spec_provided"] else
+              "and based on the scope of work and the site risk assessment. The client provided no health and safety "
+              "specification for this site. ")
+           + "A competent person reviews this plan before it is issued, and the client approves it before work starts "
+             "(CR 5(1)(l))."),
         _p(f"Drafted with {config.APP_NAME} from the client's specification, the site details and the risk assessment. "
            "Text marked [to complete] still needs the contractor's input.", SMALL),
         PageBreak(), _p("Contents", H1)]

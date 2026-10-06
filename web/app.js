@@ -276,23 +276,47 @@ ACT["pick-site"] = async (el) => {
 };
 ACT.nav = (el) => go(el.dataset.to);
 VIEWS.site = (id) => {
-  const x = id === "new" ? {} : S.me.sites.find((s) => s.id === id) || {};
-  render(`${head(id === "new" ? "New site" : "Edit site", "", "sites")}<div class="card">
+  const isNew = id === "new", x = isNew ? {} : S.me.sites.find((s) => s.id === id) || {};
+  const d = S.me.company.defaults || {}, others = S.me.sites.filter((s) => s.id !== id);
+  const yn = (v) => `<div class="answer" style="grid-template-columns:1fr 1fr">${[["Yes", true], ["No", false]].map(([l, b]) =>
+    `<button class="${b ? "ok" : "na"} ${v === b ? "on" : ""}" data-act="st-spec" data-v="${b}">${l}</button>`).join("")}</div>`;
+  render(`${head(isNew ? "New site" : "Edit site", "", "sites")}
+    ${isNew && others.length ? `<div class="card"><label>Copy the setup of an existing site (optional)</label>
+      <select id="st-copy"><option value="">No, start from the company defaults</option>${others.map((o) => `<option value="${o.id}">${esc(o.name)}</option>`).join("")}</select>
+      <label class="check"><input type="checkbox" id="st-copyw"> Also add the same workers</label>
+      <p class="muted small">Copies the work types, contacts, emergency details, consultant and scope. Change anything after.</p></div>` : ""}
+    <div class="card">
     <label>Site name</label><input id="st-name" value="${esc(x.name || "")}" placeholder="Erf 1234, Plettenberg Bay">
     <label>Address</label><input id="st-addr" value="${esc(x.address || "")}">
+    <label>Scope of work</label><textarea id="st-scope" placeholder="New double-storey house, 280 m²: foundations, brickwork, concrete slab, roof">${esc(x.scope || "")}</textarea>
     <label>Client</label><input id="st-client" value="${esc(x.client || "")}">
     <label>Client's H&S agent</label><input id="st-agent" value="${esc(x.client_agent || "")}">
-    <label>Emergency info (nearest hospital, numbers)</label><textarea id="st-em">${esc(x.emergency || "")}</textarea>
+    <label>Did the client give you an H&S specification?</label>${yn(x.spec_provided)}
+    <p class="muted small" id="st-spec-note">${x.spec_provided === false ? "The H&S plan follows the scope of work and the regulations." : x.spec_provided ? "Load it under More → Client documents. The H&S plan follows it." : "Big sites usually have one. Small jobs often do not."}</p>
+    <label>Emergency info (nearest hospital, numbers)</label><textarea id="st-em">${esc(isNew ? (d.emergency || "") : (x.emergency || ""))}</textarea>
+    ${isNew && d.emergency ? `<p class="muted small">From your company defaults. Change it if this site is in another town.</p>` : ""}
     <div class="grid2"><div><label>Start date</label><input id="st-start" type="date" value="${esc(x.start_date || "")}"></div>
     <div><label>End date</label><input id="st-end" type="date" value="${esc(x.end_date || "")}"></div></div>
-    ${id !== "new" ? `<label>Status</label><select id="st-status"><option value="active">Active</option><option value="closed" ${x.status === "closed" ? "selected" : ""}>Closed</option></select>` : ""}
+    ${!isNew ? `<label>Status</label><select id="st-status"><option value="active">Active</option><option value="closed" ${x.status === "closed" ? "selected" : ""}>Closed</option></select>` : ""}
     <button class="primary" data-act="save-site" data-id="${esc(id)}">Save site</button></div>`);
+  S.specProvided = x.spec_provided ?? null;
+  const copy = $("#st-copy");
+  if (copy) copy.onchange = () => { const o = others.find((s) => s.id === copy.value);
+    if (o) { $("#st-em").value = o.emergency || ""; $("#st-scope").value = o.scope || ""; } };
+};
+ACT["st-spec"] = (b) => {
+  S.specProvided = b.dataset.v === "true";
+  document.querySelectorAll('[data-act="st-spec"]').forEach((x) => x.classList.toggle("on", x === b));
+  $("#st-spec-note").textContent = S.specProvided ? "Load it under More → Client documents after you save. The H&S plan follows it."
+    : "The H&S plan follows the scope of work and the regulations.";
 };
 ACT["save-site"] = (btn) => busy(btn, "Saving…", async () => {
   const id = btn.dataset.id;
-  const body = { name: $("#st-name").value, address: $("#st-addr").value, client: $("#st-client").value,
-    client_agent: $("#st-agent").value, emergency: $("#st-em").value, start_date: $("#st-start").value, end_date: $("#st-end").value };
+  const body = { name: $("#st-name").value, address: $("#st-addr").value, scope: $("#st-scope").value, client: $("#st-client").value,
+    client_agent: $("#st-agent").value, emergency: $("#st-em").value, start_date: $("#st-start").value, end_date: $("#st-end").value,
+    spec_provided: S.specProvided };
   if ($("#st-status")) body.status = $("#st-status").value;
+  if ($("#st-copy")?.value) { body.copy_from = $("#st-copy").value; body.copy_workers = $("#st-copyw").checked; }
   const x = id === "new" ? await api("/api/sites", { json: body }) : await api("/api/sites/" + id, { method: "PUT", json: body });
   await loadMe();
   S.siteId = x.id; ls.set("ss-site", x.id); await loadSite(true);
@@ -504,7 +528,7 @@ VIEWS.more = () => {
     ${item("plant", "🚜", "Plant and QR codes")}
     ${item("esign", "🖊️", "E-signature agreement")}
     ${item("users", "👥", "Logins and roles", "", can.owner())}
-    ${item("company", "🏢", "Company details and site rules", "", can.manage())}
+    ${item("company", "🏢", "Company details and defaults", "Emergency numbers, contacts and consultant for every new site", can.manage())}
     ${item("profile", "👤", "My profile and password")}
     <div class="card"><label class="check"><input type="checkbox" data-act-change="theme" ${dark ? "checked" : ""}> Dark screen (for indoors)</label></div>
     <button data-act="logout">Log out</button>

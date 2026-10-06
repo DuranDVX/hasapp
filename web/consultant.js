@@ -185,15 +185,15 @@ VIEWS.hsplan = async () => {
   drawPlan(r);
 };
 function drawPlan(r) {
-  const p = r.plan, aesDoc = p?.aes, missing = r.inputs.filter((i) => !i.ok);
+  const p = r.plan, aesDoc = p?.aes, missing = r.inputs.filter((i) => i.ok === false);
   const status = aesDoc?.status === "signed" ? `<div class="note ok"><b>Approved plan on file.</b> Version ${p.version}, signed ${esc(aesDoc.signed_at)}. It is in the safety file.</div>`
     : aesDoc ? `<div class="note warn"><b>Version ${p.version} is out for signature</b> since ${esc(aesDoc.created_at)}. Upload the signed copy when it comes back.
         <button class="small" data-act="nav" data-to="aes" style="margin-top:6px">Open documents for signing</button></div>` : "";
   render(`${head("H&S plan", "The principal contractor's site plan (CR 7(1)(a)). The app drafts it from the client's spec, the site and the risk assessment. A competent person checks and signs it; the client approves it.", "file")}
     ${status}
     <div class="card"><b>What the plan is built from</b>
-      ${r.inputs.map((i) => `<div class="row" style="margin-top:8px;align-items:flex-start"><span class="badge ${i.ok ? "ok" : "warn"}" style="flex:none">${i.ok ? "✓" : "!"}</span>
-        <div class="grow small"><b>${esc(i.label)}</b>${i.ok ? "" : `<div class="muted">${esc(i.detail)} <a href="#${i.action}">Fix</a></div>`}</div></div>`).join("")}
+      ${r.inputs.map((i) => `<div class="row" style="margin-top:8px;align-items:flex-start"><span class="badge ${i.ok ? "ok" : i.ok === null ? "" : "warn"}" style="flex:none">${i.ok ? "✓" : i.ok === null ? "–" : "!"}</span>
+        <div class="grow small"><b>${esc(i.label)}</b>${i.ok || i.ok === null ? "" : `<div class="muted">${esc(i.detail)} <a href="#${i.action}">Fix</a></div>`}</div></div>`).join("")}
       ${missing.length ? `<p class="small muted" style="margin-top:8px">You can draft now. Missing facts show in the plan as <b>[to complete]</b>.</p>` : ""}</div>
     ${!p ? `<div class="card"><p>The app writes all ${r.sections.length} sections: scope, policy, appointments, risk assessment, training, inspections, site hazards, permits, PPE, contractors, incidents, emergencies, welfare, records and review.</p>
         <p class="small muted">It takes about a minute. You can change any text before you issue it.</p></div>

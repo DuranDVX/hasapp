@@ -259,7 +259,7 @@ ACT["user-toggle"] = (btn) => busy(btn, "…", async () => {
 
 VIEWS.company = () => {
   if (needOnline()) return;
-  const c = S.me.company; let logo = "";
+  const c = S.me.company, d = c.defaults || {}, dc = (d.consultants || [])[0] || {}; let logo = "";
   render(`<h1>Company</h1><div class="card">
     <label>Company name</label><input id="c-name" value="${esc(c.name)}">
     <label>Registration number</label><input id="c-reg" value="${esc(c.reg_no)}">
@@ -267,12 +267,27 @@ VIEWS.company = () => {
     <label>Phone</label><input id="c-phone" value="${esc(c.phone)}"><label>Email</label><input id="c-email" value="${esc(c.email)}">
     <label>Address</label><textarea id="c-addr">${esc(c.address)}</textarea>
     <div class="row"><img id="c-logo" class="${c.logo_url ? "" : "hidden"}" src="${c.logo_url}" style="max-height:48px"><button class="small" data-act="c-logo">Logo for PDFs</button></div>
-    <label>Site rules for inductions</label><textarea id="c-ind" style="min-height:240px">${esc(c.induction_text)}</textarea>
-    <button class="primary" data-act="c-save">Save</button></div>`);
+    <label>Site rules for inductions</label><textarea id="c-ind" style="min-height:240px">${esc(c.induction_text)}</textarea></div>
+    <h2>Defaults for every new site</h2>
+    <div class="card"><p class="small muted">Set these once. Every new site starts with them; change them on a site that is in another town.</p>
+      <label>Emergency info (nearest hospital, ambulance, fire, police)</label><textarea id="cd-em">${esc(d.emergency || "")}</textarea>
+      <label>Contacts</label>
+      ${[0, 1, 2, 3, 4].map((i) => { const x = (d.contacts || [])[i] || {}; return `<div style="display:grid;grid-template-columns:1.1fr 1.2fr 1fr;gap:6px">
+        <input data-cdc="${i}" data-ck="role" list="cd-roles" value="${esc(x.role || "")}" placeholder="Role"><input data-cdc="${i}" data-ck="name" value="${esc(x.name || "")}" placeholder="Name">
+        <input data-cdc="${i}" data-ck="phone" type="tel" value="${esc(x.phone || "")}" placeholder="Phone"></div>`; }).join("")}
+      <datalist id="cd-roles">${["Construction manager", "Site supervisor", "Safety officer", "First aider", "Fire marshal", "Security"].map((r) => `<option value="${r}">`).join("")}</datalist>
+      <label>Safety consultant</label>
+      <div class="grid2"><input data-cdk="name" value="${esc(dc.name || "")}" placeholder="Name"><input data-cdk="firm" value="${esc(dc.firm || "")}" placeholder="Firm"></div>
+      <div class="grid2"><input data-cdk="reg" value="${esc(dc.reg || "")}" placeholder="Registration (SACPCMP / Saiosh no.)"><input data-cdk="phone" type="tel" value="${esc(dc.phone || "")}" placeholder="Phone"></div>
+      <input data-cdk="email" type="email" value="${esc(dc.email || "")}" placeholder="Email"></div>
+    ${actionBar(`<button class="primary" data-act="c-save">Save</button>`)}`);
   ACT["c-logo"] = async () => { const p = await pickPhoto(); if (p) { logo = p; $("#c-logo").src = p; $("#c-logo").classList.remove("hidden"); } };
   ACT["c-save"] = (btn) => busy(btn, "Saving…", async () => {
     const body = { name: $("#c-name").value, reg_no: $("#c-reg").value, coid_no: $("#c-coid").value, phone: $("#c-phone").value,
       email: $("#c-email").value, address: $("#c-addr").value, induction_text: $("#c-ind").value };
+    body.defaults = { emergency: $("#cd-em").value,
+      contacts: [0, 1, 2, 3, 4].map((i) => Object.fromEntries([...document.querySelectorAll(`[data-cdc="${i}"]`)].map((el) => [el.dataset.ck, el.value.trim()]))),
+      consultants: [Object.fromEntries([...document.querySelectorAll("[data-cdk]")].map((el) => [el.dataset.cdk, el.value.trim()]))] };
     if (logo) body.logo = logo;
     await api("/api/company", { method: "PUT", json: body });
     await loadMe(); await loadSite(true); toast("Saved.", "ok");

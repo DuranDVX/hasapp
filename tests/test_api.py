@@ -389,3 +389,31 @@ def test_hs_plan_draft_edit_issue_sign(co, monkeypatch):
     assert r.status_code == 200, r.text
     board = client.get(f"/api/board?site_id={sid}", headers=h).json()
     assert next(t for t in board["tiles"] if t["key"] == "hs_plan")["status"] == "green"
+
+
+def test_company_defaults_copy_site_and_plan_without_spec(co, monkeypatch):
+    h, sid = co["h"], co["site"]["id"]
+    client.put("/api/company", json={"defaults": {"emergency": "Plett hospital 044 000 0000",
+                                                  "contacts": [{"role": "Construction manager", "name": "John", "phone": "082"}],
+                                                  "consultants": [{"name": "C. Consultant"}]}}, headers=h)
+    new = client.post("/api/sites", json={"name": "Site B"}, headers=h).json()
+    assert new["emergency"].startswith("Plett") and new["contacts"][0]["name"] == "John"
+    assert new["consultants"][0]["name"] == "C. Consultant"
+    client.put(f"/api/sites/{sid}", json={"features": {"excavations": True, "roof_work": True}, "scope": "New house, 280 m2",
+                                          "other_work": ["Pool construction", "pool construction"], "spec_provided": False,
+                                          "emergency": "Sedgefield clinic"}, headers=h)
+    me_ = client.get("/api/me", headers=h).json()
+    assert me_["company"]["defaults"]["other_work_seen"] == ["Pool construction"]
+    copy = client.post("/api/sites", json={"name": "Site C", "copy_from": sid, "copy_workers": True}, headers=h).json()
+    assert copy["features"]["roof_work"] and copy["scope"] == "New house, 280 m2" and copy["emergency"] == "Sedgefield clinic"
+    assert len(client.get(f"/api/workers?site_id={copy['id']}", headers=h).json()) == 2
+    seen = {}
+    monkeypatch.setattr(ai, "hs_plan", lambda data: seen.update(data) or {"text": {}, "questions": []})
+    client.post("/api/hs-plan/draft", json={"site_id": sid}, headers=h)
+    assert seen["client_spec_status"] == "none" and seen["site"]["scope_of_work"] == "New house, 280 m2"
+    assert "Pool construction" in seen["site"]["work_types"]
+    r = client.get(f"/api/hs-plan?site_id={sid}", headers=h).json()
+    assert any(i["ok"] is None and "No client H&S specification" in i["label"] for i in r["inputs"])
+    text = "".join(pg.extract_text() for pg in PdfReader(io.BytesIO(
+        client.get(f"/api/hs-plan/pdf?site_id={sid}", headers=h).content)).pages)
+    assert "None provided for this site" in text and "provided no health and safety" in text

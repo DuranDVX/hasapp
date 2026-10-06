@@ -93,8 +93,19 @@ VIEWS.inspections = async () => {
 VIEWS.setup = () => {
   const site = S.data.site, f = site.features || {};
   render(`${head("Site setup", "Tick what this site has. The board then shows only the duties that apply.", "board")}
-    <div class="card">${Object.entries(S.data.site_features).map(([k, v]) =>
-      `<label class="check"><input type="checkbox" data-f="${k}" ${f[k] ? "checked" : ""}> ${esc(v)}</label>`).join("")}</div>
+    ${(S.data.site_feature_groups || [["Work on this site", Object.keys(S.data.site_features)]]).map(([g, keys]) => `<div class="card"><b>${esc(g)}</b>
+      ${keys.filter((k) => S.data.site_features[k]).map((k) => `<label class="check"><input type="checkbox" data-f="${k}" ${f[k] ? "checked" : ""}> ${esc(S.data.site_features[k])}</label>`).join("")}</div>`).join("")}
+    <div class="card"><b>Other work on this site</b><p class="small muted">Anything not in the lists. Type it once; it shows as a quick pick on every site after that.</p>
+      <div class="chips" id="su-other">${(site.other_work || []).map((w) => `<button class="chip on" data-act="su-work" data-v="${esc(w)}">${esc(w)} ✕</button>`).join("")}</div>
+      ${(() => { const seen = (S.me.company.defaults?.other_work_seen || []).filter((w) => !(site.other_work || []).includes(w));
+        return seen.length ? `<div class="chips" style="margin-top:6px">${seen.map((w) => `<button class="chip" data-act="su-work" data-v="${esc(w)}">+ ${esc(w)}</button>`).join("")}</div>` : ""; })()}
+      <div class="row" style="margin-top:6px"><input id="su-work-new" placeholder="e.g. Pool construction, Paving, Waterproofing" style="margin:0"><button class="small" data-act="su-work-add">Add</button></div></div>
+    <div class="card"><b>Site contacts</b><p class="small muted">Go into the H&S plan and emergency details.</p>
+      ${[0, 1, 2, 3, 4].map((i) => { const c = (site.contacts || [])[i] || {}; return `<div class="grid3" style="display:grid;grid-template-columns:1.1fr 1.2fr 1fr;gap:6px">
+        <input data-ct="${i}" data-ck="role" list="ct-roles" value="${esc(c.role || "")}" placeholder="Role"><input data-ct="${i}" data-ck="name" value="${esc(c.name || "")}" placeholder="Name">
+        <input data-ct="${i}" data-ck="phone" type="tel" value="${esc(c.phone || "")}" placeholder="Phone"></div>`; }).join("")}
+      <datalist id="ct-roles">${(S.data.contact_roles || []).map((r) => `<option value="${esc(r)}">`).join("")}</datalist>
+      ${(S.me.company.defaults?.contacts || []).length ? `<button class="small" data-act="su-def-contacts">Use the company contacts</button>` : ""}</div>
     <div class="card"><b>Facilities on site</b><div class="grid2"><div><label>Toilets</label><input id="su-toilets" inputmode="numeric" value="${esc(site.facilities?.toilets ?? "")}"></div>
       <div><label>Showers</label><input id="su-showers" inputmode="numeric" value="${esc(site.facilities?.showers ?? "")}"></div></div></div>
     <div class="card"><b>Safety consultant</b><p class="small muted">Their name goes on the letterhead of the incident flash report.</p>
@@ -105,7 +116,7 @@ VIEWS.setup = () => {
     ${site.has_ra ? `<div class="card"><label class="check"><input type="checkbox" id="su-raonly" ${site.ra_only ? "checked" : ""}> Use only the consultant's risk assessment on this site</label></div>` : ""}
     <div class="card"><label class="check"><input type="checkbox" id="su-print" ${site.print_required ? "checked" : ""}> The client wants paper copies</label>
       <p class="muted small">The app still keeps the electronic original. Use the Print centre for the paper copies.</p></div>
-    <div class="card"><button class="link" data-act="nav" data-to="site/${site.id}">Edit site name, client and emergency details ›</button></div>
+    <div class="card"><button class="link" data-act="nav" data-to="site/${site.id}">Edit site name, scope, client, H&S spec and emergency details ›</button></div>
     ${actionBar(`<button class="primary" data-act="setup-save">Save setup</button>`)}`);
 };
 ACT["setup-save"] = (btn) => busy(btn, "Saving…", async () => {
@@ -116,9 +127,28 @@ ACT["setup-save"] = (btn) => busy(btn, "Saving…", async () => {
     facilities: { toilets: $("#su-toilets").value || "0", showers: $("#su-showers").value || "0" } };
   if ($("#su-raonly")) body.ra_only = $("#su-raonly").checked;
   body.consultants = [0, 1].map((i) => Object.fromEntries([...document.querySelectorAll(`[data-cons="${i}"]`)].map((el) => [el.dataset.ck, el.value.trim()])));
+  body.contacts = [0, 1, 2, 3, 4].map((i) => Object.fromEntries([...document.querySelectorAll(`[data-ct="${i}"]`)].map((el) => [el.dataset.ck, el.value.trim()])));
+  body.other_work = [...document.querySelectorAll("#su-other [data-v]")].map((b) => b.dataset.v);
   await api("/api/sites/" + S.siteId, { method: "PUT", json: body });
   await loadMe(); await loadSite(true); toast("Saved.", "ok"); go("board");
 });
+
+ACT["su-work"] = (b) => {
+  const v = b.dataset.v, box = $("#su-other"), mine = [...box.querySelectorAll("[data-v]")].find((x) => x.dataset.v === v);
+  if (mine) { mine.remove(); return; }
+  box.insertAdjacentHTML("beforeend", `<button class="chip on" data-act="su-work" data-v="${esc(v)}">${esc(v)} ✕</button>`); b.remove();
+};
+ACT["su-work-add"] = () => {
+  const v = $("#su-work-new").value.trim(); if (!v) return;
+  $("#su-other").insertAdjacentHTML("beforeend", `<button class="chip on" data-act="su-work" data-v="${esc(v)}">${esc(v)} ✕</button>`);
+  $("#su-work-new").value = "";
+};
+ACT["su-def-contacts"] = () => {
+  (S.me.company.defaults?.contacts || []).slice(0, 5).forEach((c, i) => {
+    ["role", "name", "phone"].forEach((k) => { const el = document.querySelector(`[data-ct="${i}"][data-ck="${k}"]`); if (el) el.value = c[k] || ""; });
+  });
+  toast("Company contacts filled in. Save to keep them.", "ok");
+};
 
 // ---------------------------------------------------------------- e-signature agreement
 

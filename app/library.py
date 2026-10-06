@@ -662,3 +662,36 @@ HS_PLAN_SIGNERS = ["Principal contractor: chief executive officer or s16(2) appo
                    "Client or client's agent: approval (CR 5(1)(l))"]
 
 AES_DOCS["hs_plan"] = "Site health and safety plan (CR 7(1)(a))"
+
+
+# ---------------------------------------------------------------- more work types
+# Each one feeds the H&S plan and the AI. Grouped for the setup screen.
+SITE_FEATURES.update({
+    "roof_work": "Roof work (sheeting, trusses, fragile roofs)",
+    "concrete": "Concrete work and formwork",
+    "structures": "Structural steel or precast erection",
+    "cranes": "Cranes or lifting (mobile crane, lifting tackle)",
+    "suspended_platforms": "Suspended platforms or rope access",
+    "hot_work": "Welding, cutting or grinding (hot work)",
+    "electrical_work": "Electrical installation work",
+    "confined_spaces": "Confined spaces (manholes, tanks, sewers)",
+    "flammables": "Fuel, gas cylinders or flammable liquids",
+    "hazardous_chemicals": "Hazardous chemicals (solvents, bitumen, epoxies)",
+    "asbestos": "Asbestos (old roofs, pipes, boards)",
+    "water": "Work in or near water",
+    "roads": "Work on or next to a public road",
+    "occupied": "Work in occupied premises (people live or work there)",
+})
+SITE_FEATURE_GROUPS = [
+    ("Ground and structure", ["excavations", "concrete", "temporary_works", "structures", "demolition"]),
+    ("Work at height", ["work_at_height", "roof_work", "scaffolding", "suspended_platforms"]),
+    ("Plant and lifting", ["mobile_plant", "cranes", "material_hoist"]),
+    ("Power, heat and chemicals", ["temporary_power", "electrical_work", "hot_work", "flammables", "hazardous_chemicals",
+                                   "asbestos", "confined_spaces"]),
+    ("People and place", ["subcontractors", "occupied", "roads", "water"]),
+]
+CONTACT_ROLES = ["Construction manager", "Site supervisor", "Safety officer", "First aider", "Fire marshal",
+                 "Client's agent", "Security"]
+HS_PLAN_REFS = HS_PLAN_REFS.replace("General Safety Regulations 2 (PPE) and 3 (first aid);",
+                                    "General Safety Regulations 2 (PPE), 3 (first aid) and 5 (confined spaces); "
+                                    "Asbestos Abatement Regulations, 2020;")

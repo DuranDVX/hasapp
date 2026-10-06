@@ -313,6 +313,13 @@ Rules:
 - The app adds these tables itself, so do not repeat their contents: project details, the list of laws, the appointment
   table, the risk assessment table, the inspection schedule, the minimum PPE list and the register list. Refer to them
   as "the table below" where it helps.
+- client_spec_status "provided but not loaded yet": the client has a specification that is not in the app yet. Write
+  "[to complete: ...]" where its rules would go, and add one question asking to load it.
+- client_spec_status "none": the client gave no health and safety specification for this site. Then base the plan on
+  the scope of work, the work types, the risk assessment and the Construction Regulations. Say once, in the
+  introduction, that no client specification was provided. Do not ask for a specification and do not cite "spec".
+- Use scope_of_work to describe the works. If it is empty, write "[to complete: scope of work]".
+- Use the site contacts (role, name, phone) where the plan needs a person or a number.
 - questions: short questions about facts the plan still needs from the contractor (at most 5 for your sections).""".format(
     refs=library.HS_PLAN_REFS)
 

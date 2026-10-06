@@ -41,6 +41,7 @@ class Company(Base):
     esign_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     active: Mapped[bool] = mapped_column(Boolean, default=True)          # platform admin can switch off
     invite: Mapped[str] = mapped_column(String(60), default="")          # invite code used at sign-up
+    defaults: Mapped[dict] = mapped_column(JSON, default=dict)   # new sites start with these: emergency, contacts, consultants
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -331,7 +332,7 @@ def _add_missing_columns() -> None:
                     default = f" DEFAULT {d}"
                 elif isinstance(d, str):
                     default = " DEFAULT '" + d.replace("'", "''") + "'"
-                elif col.name in ("features", "settings"):
+                elif col.name in ("features", "settings", "defaults"):
                     default = " DEFAULT '{}'"
                 elif col.name in ("signers", "signatures"):
                     default = " DEFAULT '[]'"

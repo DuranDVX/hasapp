@@ -191,7 +191,7 @@ def user_d(u: db.User) -> dict:
 def company_d(c: db.Company) -> dict:
     return {"id": c.id, "name": c.name, "reg_no": c.reg_no, "address": c.address, "phone": c.phone,
             "email": c.email, "coid_no": c.coid_no, "logo_url": files.sign(c.logo_file),
-            "induction_text": c.induction_text or library.DEFAULT_INDUCTION}
+            "induction_text": c.induction_text or library.DEFAULT_INDUCTION, "defaults": c.defaults or {}}
 
 
 def site_d(x: db.Site) -> dict:
@@ -203,6 +203,8 @@ def site_d(x: db.Site) -> dict:
             "ra_only": bool((x.settings or {}).get("ra_only")),
             "facilities": (x.settings or {}).get("facilities") or {},
             "consultants": (x.settings or {}).get("consultants") or [],
+            "contacts": (x.settings or {}).get("contacts") or [], "other_work": (x.settings or {}).get("other_work") or [],
+            "scope": (x.settings or {}).get("scope") or "", "spec_provided": (x.settings or {}).get("spec_provided"),
             "has_spec": bool((x.settings or {}).get("spec")), "has_ra": bool((x.settings or {}).get("ra"))}
 
 
@@ -414,6 +416,10 @@ def update_company(body: dict = Body(...), ctx: Ctx = Depends(current)):
             c.address = _s(body["address"], 500)
         if "induction_text" in body:
             c.induction_text = _s(body["induction_text"], 8000)
+        if isinstance(body.get("defaults"), dict):
+            d = body["defaults"]
+            c.defaults = {**(c.defaults or {}), "emergency": _s(d.get("emergency"), 1000),
+                          "contacts": _contacts(d.get("contacts")), "consultants": _consultants(d.get("consultants"))}
         if body.get("logo"):
             try:
                 c.logo_file = files.put_data_url(c.id, body["logo"])
@@ -508,21 +514,69 @@ def _site_fields(x: db.Site, body: dict) -> None:
     if "ra_only" in body:
         x.settings = {**(x.settings or {}), "ra_only": bool(body["ra_only"])}
     if isinstance(body.get("consultants"), list):
-        cons = [{k: _s(c.get(k), 120) for k in ("name", "firm", "reg", "phone", "email")}
-                for c in body["consultants"][:2] if isinstance(c, dict) and _s(c.get("name"))]
-        x.settings = {**(x.settings or {}), "consultants": cons}
+        x.settings = {**(x.settings or {}), "consultants": _consultants(body["consultants"])}
+    if isinstance(body.get("contacts"), list):
+        x.settings = {**(x.settings or {}), "contacts": _contacts(body["contacts"])}
+    if isinstance(body.get("other_work"), list):
+        x.settings = {**(x.settings or {}), "other_work": _other_work(body["other_work"])}
+    if "scope" in body:
+        x.settings = {**(x.settings or {}), "scope": _s(body["scope"], 3000)}
+    if "spec_provided" in body:   # did the client give an H&S specification? None = not answered
+        v = body["spec_provided"]
+        x.settings = {**(x.settings or {}), "spec_provided": None if v is None else bool(v)}
     if not x.name:
         raise HTTPException(400, "The site needs a name.")
 
 
+def _consultants(v) -> list:
+    return [{k: _s(c.get(k), 120) for k in ("name", "firm", "reg", "phone", "email")}
+            for c in (v or [])[:2] if isinstance(c, dict) and _s(c.get("name"))]
+
+
+def _contacts(v) -> list:
+    return [{k: _s(c.get(k), 120) for k in ("role", "name", "phone")}
+            for c in (v or [])[:8] if isinstance(c, dict) and (_s(c.get("name")) or _s(c.get("phone")))]
+
+
+def _other_work(v) -> list:
+    out = []
+    for x in (v or [])[:20]:
+        t = _s(x, 120)
+        if t and t.lower() not in [o.lower() for o in out]:
+            out.append(t)
+    return out
+
+
+def _remember_work(company: db.Company, site: db.Site) -> None:
+    """Other work typed on a site becomes a suggestion for every site: the list builds up over time."""
+    seen = list((company.defaults or {}).get("other_work_seen") or [])
+    for t in (site.settings or {}).get("other_work") or []:
+        if t.lower() not in [x.lower() for x in seen]:
+            seen.append(t)
+    company.defaults = {**(company.defaults or {}), "other_work_seen": seen[-60:]}
+
+
 @app.post("/api/sites")
 def add_site(body: dict = Body(...), ctx: Ctx = Depends(current)):
+    """A new site starts from the company defaults, or from a copy of another site's setup."""
     ctx.need(*auth.MANAGE)
     with db.session() as s:
-        x = db.Site(company_id=ctx.cid, name="")
-        _site_fields(x, body)
+        company = s.get(db.Company, ctx.cid)
+        d = company.defaults or {}
+        x = db.Site(company_id=ctx.cid, name="", emergency=d.get("emergency") or "", features=dict(d.get("features") or {}),
+                    settings={"contacts": d.get("contacts") or [], "consultants": d.get("consultants") or []})
+        src = _get(s, db.Site, body["copy_from"], ctx, "Site") if body.get("copy_from") else None
+        if src:
+            x.features, x.emergency, x.print_required = dict(src.features or {}), src.emergency, src.print_required
+            x.settings = {k: v for k, v in (src.settings or {}).items()
+                          if k in ("contacts", "consultants", "facilities", "other_work", "scope")}
+        _site_fields(x, {k: v for k, v in body.items() if v not in ("", None)})
         s.add(x)
         s.flush()
+        if src and body.get("copy_workers"):
+            for sw in s.scalars(select(db.SiteWorker).where(db.SiteWorker.site_id == src.id)).all():
+                s.add(db.SiteWorker(site_id=x.id, worker_id=sw.worker_id))
+        _remember_work(company, x)
         return site_d(x)
 
 
@@ -532,6 +586,7 @@ def update_site(sid: str, body: dict = Body(...), ctx: Ctx = Depends(current)):
     with db.session() as s:
         x = _get(s, db.Site, sid, ctx, "Site")
         _site_fields(x, body)
+        _remember_work(s.get(db.Company, ctx.cid), x)
         return site_d(x)
 
 
@@ -881,7 +936,8 @@ def sync(site_id: str, ctx: Ctx = Depends(current)):
                 "tts_languages": [l for l in library.TTS_VOICES if tts.enabled(l)],
                 "incident_types": library.INCIDENT_TYPES, "credential_kinds": library.CREDENTIAL_KINDS,
                 "file_sections": library.FILE_SECTIONS,
-                "site_features": library.SITE_FEATURES, "appointments": library.APPOINTMENTS,
+                "site_features": library.SITE_FEATURES, "site_feature_groups": library.SITE_FEATURE_GROUPS,
+                "contact_roles": library.CONTACT_ROLES, "appointments": library.APPOINTMENTS,
                 "visitor_ppe": library.VISITOR_PPE, "visitor_rules": library.VISITOR_RULES,
                 "audit_items": library.AUDIT_ITEMS, "aes_kinds": library.AES_DOCS,
                 "worker_consent": library.WORKER_CONSENT, "inspection_schedule": library.INSPECTION_SCHEDULE,
@@ -1566,6 +1622,7 @@ EVERY = {"shift": "Before each shift", "day": "Daily", "week": "Weekly", "month"
 def _plan_data(s, ctx: Ctx, site: db.Site) -> dict:
     """Everything the plan uses: the AI's context and the PDF's tables."""
     st = site.settings or {}
+    cdef = s.get(db.Company, ctx.cid).defaults or {}
     spec, feats = st.get("spec") or {}, site.features or {}
     on = lambda f: f is None or bool(feats.get(f))
     risks = [risk_d(r) for r in s.scalars(site_risks_q(ctx.cid, site))]
@@ -1602,14 +1659,20 @@ def _plan_data(s, ctx: Ctx, site: db.Site) -> dict:
                                 "ref": f"spec {x.get('clause') or ''}".strip()})
     return {
         "today": today().isoformat(),
+        "site_id": site.id,
         "principal_contractor": ctx.company.name,
         "site": {"name": site.name, "address": site.address, "client": site.client, "client_agent": site.client_agent,
                  "start_date": site.start_date.isoformat() if site.start_date else "",
                  "end_date": site.end_date.isoformat() if site.end_date else "",
-                 "emergency_details": site.emergency, "work_types": [library.SITE_FEATURES[k] for k, v in feats.items()
-                                                                      if v and k in library.SITE_FEATURES],
+                 "emergency_details": site.emergency or cdef.get("emergency") or "",
+                 "contacts": st.get("contacts") or cdef.get("contacts") or [],
+                 "scope_of_work": st.get("scope") or "",
+                 "work_types": [library.SITE_FEATURES[k] for k, v in feats.items() if v and k in library.SITE_FEATURES]
+                               + (st.get("other_work") or []),
                  "facilities_on_site": st.get("facilities") or {}, "workers_on_register": n_workers,
                  "consultants": [c for c in st.get("consultants") or [] if c.get("name")]},
+        "client_spec_provided": bool(spec) or bool(st.get("spec_provided")),
+        "client_spec_status": "loaded" if spec else "provided but not loaded yet" if st.get("spec_provided") else "none",
         "client_spec": {k: spec.get(k) for k in ("project", "client", "author", "date", "frequencies", "client_hazards",
                                                  "key_rules", "permits", "ppe_minimum", "facilities", "ra_team_required")}
                        if spec else None,
@@ -1622,23 +1685,32 @@ def _plan_data(s, ctx: Ctx, site: db.Site) -> dict:
         "contractors": contractors,
         "ppe_minimum": spec.get("ppe_minimum") or library.HS_PLAN_DEFAULT_PPE,
         "registers": [x["title"] for x in library.FILE_SECTIONS],
+        "asbestos": bool(feats.get("asbestos")),
     }
 
 
 def _plan_inputs(data: dict) -> list[dict]:
     st, sp = data["site"], data["client_spec"]
     n_ok = len([r for r in data["risk_assessment"] if r["approved"]])
+    spec_item = {"label": "Client's H&S specification loaded", "ok": True, "detail": "", "action": "consultant"} if sp else \
+        {"label": "Client's H&S specification", "ok": False, "action": "consultant",
+         "detail": "Site setup says the client gave you one. Load it under More → Client documents."} \
+        if data["client_spec_provided"] else \
+        {"label": "No client H&S specification: the plan follows the scope of work and the regulations", "ok": None,
+         "detail": "", "action": "site/" + data["site_id"]}
     return [
         {"label": "Site address, client and dates", "ok": bool(st["address"] and st["client"] and st["start_date"]),
-         "detail": "Fill in the address, the client and the start date.", "action": "setup"},
+         "detail": "Fill in the address, the client and the start date.", "action": "site/" + data["site_id"]},
+        {"label": "Scope of work", "ok": bool(st["scope_of_work"]),
+         "detail": "Describe the job in the site details (for example: new double-storey house, 280 m²).",
+         "action": "site/" + data["site_id"]},
         {"label": "Work on this site (excavations, scaffolds…)", "ok": bool(st["work_types"]),
          "detail": "Tick the work types in site setup.", "action": "setup"},
-        {"label": "Client's H&S specification loaded", "ok": bool(sp),
-         "detail": "Load it under More → Client documents. The plan must be based on it.", "action": "consultant"},
+        spec_item,
         {"label": "Risk assessment approved", "ok": n_ok > 0,
          "detail": f"{n_ok} of {len(data['risk_assessment'])} activities approved by a competent person.", "action": "risks"},
         {"label": "Emergency details (hospital, numbers)", "ok": bool(st["emergency_details"]),
-         "detail": "Add them in site setup.", "action": "setup"},
+         "detail": "Add them to the site, or once for all sites under More → Company details.", "action": "site/" + data["site_id"]},
     ]
 
 
