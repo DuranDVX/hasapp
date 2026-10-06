@@ -39,6 +39,18 @@ class Company(Base):
     induction_text: Mapped[str] = mapped_column(Text, default="")
     esign_accepted_by: Mapped[str] = mapped_column(String(200), default="")   # ECT s13(3) agreement
     esign_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)          # platform admin can switch off
+    invite: Mapped[str] = mapped_column(String(60), default="")          # invite code used at sign-up
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class InviteCode(Base):
+    """Pilot sign-up codes, managed in the admin page."""
+    __tablename__ = "invite_codes"
+    code: Mapped[str] = mapped_column(String(60), primary_key=True)
+    label: Mapped[str] = mapped_column(String(200), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    uses: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -53,6 +65,7 @@ class User(Base):
     sacpcmp_no: Mapped[str] = mapped_column(String(60), default="")
     pw_hash: Mapped[str] = mapped_column(String(200))
     active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 

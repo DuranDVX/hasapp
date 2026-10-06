@@ -285,3 +285,39 @@ def test_bare_domain_redirects_to_www(monkeypatch):
     r = client.get("/app.html?x=1", headers={"host": "sitebakkie.co.za"}, follow_redirects=False)
     assert r.status_code == 301 and r.headers["location"] == "https://www.sitebakkie.co.za/app.html?x=1"
     assert client.get("/api/health", headers={"host": "www.sitebakkie.co.za"}).status_code == 200
+
+
+def test_platform_admin():
+    try:
+        _platform_admin()
+    finally:   # later tests sign up without an invite
+        with db.session() as s:
+            s.query(db.InviteCode).delete()
+
+
+def _platform_admin():
+    a = {"X-Admin": server.ADMIN_TOKEN}
+    assert client.get("/api/admin/overview").status_code == 401
+    assert client.get("/api/admin/overview", headers={"X-Admin": "wrong"}).status_code == 401
+    code = client.post("/api/admin/invites", json={"label": "Benno"}, headers=a).json()["code"]
+    assert code.startswith("benno-")
+    email = f"{uuid.uuid4().hex[:8]}@test.co"
+    r = client.post("/api/signup", json={"company": "Benno Bou", "name": "Benno", "email": email,
+                                         "password": "longenough", "invite": code})
+    assert r.status_code == 200
+    ov = client.get("/api/admin/overview", headers=a).json()
+    co_ = next(c for c in ov["companies"] if c["name"] == "Benno Bou")
+    assert co_["invite"] == code and next(i for i in ov["invites"] if i["code"] == code)["uses"] == 1
+    uid = co_["users"][0]["id"]
+    temp = client.put(f"/api/admin/users/{uid}", json={"reset_password": True}, headers=a).json()["temp_password"]
+    assert client.post("/api/login", json={"email": email, "password": "longenough"}).status_code == 401
+    tok = client.post("/api/login", json={"email": email, "password": temp}).json()["token"]
+    assert client.get("/api/me", headers={"X-Token": tok}).status_code == 200
+    # Switching the company off logs everyone out and blocks login
+    client.put(f"/api/admin/companies/{co_['id']}", json={"active": False}, headers=a)
+    assert client.get("/api/me", headers={"X-Token": tok}).status_code == 401
+    assert client.post("/api/login", json={"email": email, "password": temp}).status_code == 401
+    client.put(f"/api/admin/invites/{code}", json={"active": False}, headers=a)
+    r = client.post("/api/signup", json={"company": "X", "name": "Y", "email": f"{uuid.uuid4().hex[:8]}@t.co",
+                                         "password": "longenough", "invite": code})
+    assert r.status_code == 403

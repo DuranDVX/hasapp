@@ -77,6 +77,8 @@ async def _headers(request: Request, call_next):
     for k, v in SECURITY_HEADERS.items():
         resp.headers.setdefault(k, v)
     path = request.url.path
+    if path.startswith("/admin") or path.startswith("/api/admin"):
+        resp.headers["X-Robots-Tag"] = "noindex, nofollow"
     if not path.startswith("/api/"):
         if path.endswith((".png", ".jpg", ".webp", ".ico", ".svg")):
             resp.headers.setdefault("Cache-Control", "public, max-age=86400")
@@ -273,7 +275,12 @@ def health():
 
 @app.post("/api/signup")
 def signup(body: dict = Body(...)):
-    if SIGNUP_CODE and _s(body.get("invite")).lower() not in SIGNUP_CODE:
+    invite = _s(body.get("invite")).lower()
+    with db.session() as s:
+        all_codes = s.scalars(select(db.InviteCode)).all()
+        codes = {c.code for c in all_codes if c.active}
+    # Invite-only once any code exists, even when every code is switched off.
+    if (SIGNUP_CODE or all_codes) and invite not in (SIGNUP_CODE | codes):
         raise HTTPException(403, "Sign-up needs an invite code during the pilot.")
     email = _s(body.get("email")).lower()
     if "@" not in email or not _s(body.get("company")) or not _s(body.get("name")):
@@ -282,7 +289,10 @@ def signup(body: dict = Body(...)):
     with db.session() as s:
         if s.scalar(select(db.User).where(db.User.email == email)):
             raise HTTPException(409, "That email already has an account. Log in instead.")
-        c = db.Company(name=_s(body["company"]), email=email)
+        c = db.Company(name=_s(body["company"]), email=email, invite=invite)
+        ic = s.get(db.InviteCode, invite) if invite else None
+        if ic:
+            ic.uses = (ic.uses or 0) + 1
         s.add(c)
         s.flush()
         u = db.User(company_id=c.id, email=email, name=_s(body["name"]), role="owner",
@@ -292,8 +302,8 @@ def signup(body: dict = Body(...)):
             s.add(db.RiskItem(company_id=c.id, activity=r["activity"], hazards=r["hazards"],
                               ppe=r["ppe"], source="starter"))
         s.flush()
-        if SIGNUP_CODE:
-            log.info("sign-up %s with invite %s", c.name, _s(body.get("invite")).lower())
+        if invite:
+            log.info("sign-up %s with invite %s", c.name, invite)
         return {"token": auth.new_session(s, u)}
 
 
@@ -305,6 +315,9 @@ def login(body: dict = Body(...)):
         if not u or not u.active or not auth.check_pw(body.get("password", ""), u.pw_hash):
             time.sleep(0.5)
             raise HTTPException(401, "Wrong email or password.")
+        if not s.get(db.Company, u.company_id).active:
+            raise HTTPException(401, "This company's account is switched off. Contact SiteBakkie.")
+        u.last_login_at = db.utcnow()
         return {"token": auth.new_session(s, u)}
 
 
@@ -1614,6 +1627,144 @@ def cron_expiry(x_cron_token: str = Header(None)):
                             + f"\n\nOpen {config.PUBLIC_URL}/app.html to update them.")
                 sent += 1
     return {"emails": sent}
+
+
+# ---------------------------------------------------------------- platform admin (SiteBakkie owner)
+
+def _admin_token() -> str:
+    if tok := os.getenv("ADMIN_TOKEN"):
+        return tok
+    f = config.DATA / "admin_token.txt"
+    if not f.exists():
+        f.write_text(secrets.token_urlsafe(18))
+    return f.read_text().strip()
+
+
+ADMIN_TOKEN = _admin_token()
+
+
+def admin(x_admin: str = Header(None)) -> None:
+    import hmac as _h
+    if not x_admin or not _h.compare_digest(x_admin, ADMIN_TOKEN):
+        time.sleep(0.5)
+        raise HTTPException(401, "Wrong admin code.")
+
+
+def _admin_user(u: db.User) -> dict:
+    return user_d(u) | {"company_id": u.company_id, "created_at": u.created_at.isoformat(timespec="minutes"),
+                        "last_login_at": u.last_login_at.isoformat(timespec="minutes") if u.last_login_at else ""}
+
+
+@app.get("/api/admin/overview", dependencies=[Depends(admin)])
+def admin_overview():
+    from sqlalchemy import func as F
+    week = db.utcnow() - timedelta(days=7)
+    with db.session() as s:
+        count = lambda m, *w: s.scalar(select(F.count()).select_from(m).where(*w)) or 0
+        companies = []
+        for c in s.scalars(select(db.Company).order_by(db.Company.created_at.desc())):
+            users = s.scalars(select(db.User).where(db.User.company_id == c.id).order_by(db.User.created_at)).all()
+            last = s.scalar(select(F.max(db.Record.received_at)).where(db.Record.company_id == c.id))
+            companies.append({
+                "id": c.id, "name": c.name, "email": c.email, "active": c.active, "invite": c.invite,
+                "created_at": c.created_at.isoformat(timespec="minutes"),
+                "sites": count(db.Site, db.Site.company_id == c.id),
+                "workers": count(db.Worker, db.Worker.company_id == c.id),
+                "records": count(db.Record, db.Record.company_id == c.id),
+                "records_7d": count(db.Record, db.Record.company_id == c.id, db.Record.received_at >= week),
+                "last_activity": last.isoformat(timespec="minutes") if last else "",
+                "users": [_admin_user(u) for u in users]})
+        invites = [{"code": i.code, "label": i.label, "active": i.active, "uses": i.uses,
+                    "created_at": i.created_at.date().isoformat()}
+                   for i in s.scalars(select(db.InviteCode).order_by(db.InviteCode.created_at))]
+        env_codes = sorted(SIGNUP_CODE - {i["code"] for i in invites})
+        return {"totals": {"companies": len(companies), "users": count(db.User), "sites": count(db.Site),
+                           "workers": count(db.Worker), "records": count(db.Record),
+                           "records_7d": count(db.Record, db.Record.received_at >= week)},
+                "companies": companies, "invites": invites, "env_invites": env_codes, "roles": auth.ROLES}
+
+
+@app.post("/api/admin/invites", dependencies=[Depends(admin)])
+def admin_add_invite(body: dict = Body(...)):
+    code = re.sub(r"[^a-z0-9-]", "", _s(body.get("code"), 60).lower()) or f"{re.sub(r'[^a-z]', '', _s(body.get('label')).lower())[:12] or 'pilot'}-{secrets.token_hex(2)}"
+    with db.session() as s:
+        if s.get(db.InviteCode, code):
+            raise HTTPException(409, "That code exists.")
+        s.add(db.InviteCode(code=code, label=_s(body.get("label"))))
+    return {"code": code}
+
+
+@app.put("/api/admin/invites/{code}", dependencies=[Depends(admin)])
+def admin_update_invite(code: str, body: dict = Body(...)):
+    with db.session() as s:
+        i = s.get(db.InviteCode, code)
+        if not i:
+            raise HTTPException(404, "Unknown code.")
+        if "active" in body:
+            i.active = bool(body["active"])
+        if "label" in body:
+            i.label = _s(body["label"])
+    return {"ok": True}
+
+
+@app.put("/api/admin/companies/{cid}", dependencies=[Depends(admin)])
+def admin_update_company(cid: str, body: dict = Body(...)):
+    with db.session() as s:
+        c = s.get(db.Company, cid)
+        if not c:
+            raise HTTPException(404, "Unknown company.")
+        if "active" in body:
+            c.active = bool(body["active"])
+            if not c.active:
+                for u in s.scalars(select(db.User).where(db.User.company_id == c.id)):
+                    auth.end_all(s, u.id)
+        if "name" in body and _s(body["name"]):
+            c.name = _s(body["name"])
+    return {"ok": True}
+
+
+@app.post("/api/admin/users", dependencies=[Depends(admin)])
+def admin_add_user(body: dict = Body(...)):
+    email, role = _s(body.get("email")).lower(), body.get("role", "owner")
+    if "@" not in email or not _s(body.get("name")) or role not in auth.ROLES:
+        raise HTTPException(400, "Give the name, email and role.")
+    temp = secrets.token_urlsafe(6)
+    with db.session() as s:
+        if not s.get(db.Company, body.get("company_id", "")):
+            raise HTTPException(404, "Unknown company.")
+        if s.scalar(select(db.User).where(db.User.email == email)):
+            raise HTTPException(409, "That email already has a login.")
+        u = db.User(company_id=body["company_id"], email=email, name=_s(body["name"]), role=role,
+                    pw_hash=auth.hash_pw(temp))
+        s.add(u)
+        s.flush()
+        return _admin_user(u) | {"temp_password": temp}
+
+
+@app.put("/api/admin/users/{uid}", dependencies=[Depends(admin)])
+def admin_update_user(uid: str, body: dict = Body(...)):
+    with db.session() as s:
+        u = s.get(db.User, uid)
+        if not u:
+            raise HTTPException(404, "Unknown user.")
+        out = {}
+        if "active" in body:
+            u.active = bool(body["active"])
+            if not u.active:
+                auth.end_all(s, u.id)
+        if body.get("role") in auth.ROLES:
+            u.role = body["role"]
+        if "email" in body and "@" in _s(body["email"]):
+            new = _s(body["email"]).lower()
+            if new != u.email and s.scalar(select(db.User).where(db.User.email == new)):
+                raise HTTPException(409, "That email already has a login.")
+            u.email = new
+        if body.get("reset_password"):
+            temp = secrets.token_urlsafe(6)
+            u.pw_hash = auth.hash_pw(temp)
+            auth.end_all(s, u.id)
+            out["temp_password"] = temp
+        return _admin_user(u) | out
 
 
 # ---------------------------------------------------------------- static PWA

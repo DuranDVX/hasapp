@@ -81,4 +81,6 @@ def current(x_token: str = Header(None)) -> Ctx:
         if not user or not user.active:
             raise HTTPException(401, "This login is switched off.")
         company = s.get(db.Company, user.company_id)
+        if not company.active:
+            raise HTTPException(401, "This company's account is switched off. Contact SiteBakkie.")
         return Ctx(user, company)
