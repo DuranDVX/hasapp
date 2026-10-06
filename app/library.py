@@ -211,19 +211,19 @@ FILE_SECTIONS = [
     {"key": "client_spec", "title": "Client health and safety specification", "type": "upload"},
     {"key": "hs_plan", "title": "Health and safety plan (approved)", "type": "upload"},
     {"key": "company", "title": "Company registration and COID letter of good standing", "type": "upload", "expires": True},
-    {"key": "appointments", "title": "Legal appointments and competency certificates", "type": "upload"},
+    {"key": "appointments", "title": "Legal appointments and competency certificates", "type": "auto+upload"},
     {"key": "risk_assessments", "title": "Risk assessments", "type": "auto+upload"},
     {"key": "fall_protection", "title": "Fall protection plan", "type": "upload"},
     {"key": "method_statements", "title": "Safe work procedures and method statements", "type": "upload"},
     {"key": "emergency", "title": "Emergency plan and contact numbers", "type": "upload"},
     {"key": "workers", "title": "Worker register, medical and training certificates", "type": "auto"},
-    {"key": "inductions", "title": "Induction register", "type": "auto"},
+    {"key": "inductions", "title": "Induction and visitor registers", "type": "auto"},
     {"key": "task_sheets", "title": "Daily task sheets", "type": "auto"},
     {"key": "toolbox_talks", "title": "Toolbox talks", "type": "auto"},
     {"key": "inspections", "title": "Plant checks and site inspections", "type": "auto"},
-    {"key": "incidents", "title": "Incident register and reports", "type": "auto"},
-    {"key": "audits", "title": "Audit reports", "type": "upload"},
-    {"key": "subcontractors", "title": "Subcontractors: mandatary agreements and safety files", "type": "upload"},
+    {"key": "incidents", "title": "Incident register, reports and investigations", "type": "auto"},
+    {"key": "audits", "title": "Audit reports", "type": "auto+upload"},
+    {"key": "subcontractors", "title": "Subcontractors: mandatary agreements and safety files", "type": "auto+upload"},
 ]
 UPLOAD_SECTIONS = {s["key"] for s in FILE_SECTIONS if "upload" in s["type"]}
 
@@ -250,3 +250,137 @@ DEFAULT_INDUCTION = """Site rules
 8. Report every injury, near miss and unsafe condition to the foreman at once.
 9. Know where the first aid box, the fire extinguishers and the assembly point are.
 10. You have the right to refuse work that is not safe. Tell the foreman."""
+
+
+# ---------------------------------------------------------------- site features
+# The site manager ticks what the site has. Each feature switches on duties.
+SITE_FEATURES = {
+    "excavations": "Excavations or trenches",
+    "scaffolding": "Scaffolding",
+    "work_at_height": "Work at height (roofs, edges, openings)",
+    "mobile_plant": "Construction vehicles or mobile plant",
+    "temporary_power": "Temporary electrical supply / DB board",
+    "material_hoist": "Material hoist",
+    "demolition": "Demolition",
+    "subcontractors": "Subcontractors on site",
+}
+
+# How often each inspection is due, and which feature makes it apply.
+INSPECTION_SCHEDULE = {
+    "excavation": {"every": "shift", "days": 1, "feature": "excavations", "reg": "13(2)(h)"},
+    "scaffold": {"every": "week", "days": 7, "feature": "scaffolding", "reg": "16, SANS 10085"},
+    "electrical_db": {"every": "week", "days": 7, "feature": "temporary_power", "reg": "24"},
+    "material_hoist": {"every": "day", "days": 1, "feature": "material_hoist", "reg": "19(8)"},
+    "fire_extinguisher": {"every": "month", "days": 30, "feature": None, "reg": "GSR 3"},
+    "first_aid": {"every": "month", "days": 30, "feature": None, "reg": "GSR 3"},
+    "ladder": {"every": "month", "days": 30, "feature": "work_at_height", "reg": "GSR 13A"},
+}
+
+CHECKLISTS["material_hoist"] = {
+    "title": "Material hoist daily inspection", "kind": "inspection", "aes": True,
+    "note": "Reg 19(8): a competent person appointed in writing inspects daily and signs the record book. "
+            "Sign this record with an advanced electronic signature (AES) or wet ink.",
+    "items": [
+        {"q": "Guides and tower secure", "critical": True},
+        {"q": "Ropes and their connections not damaged", "critical": True},
+        {"q": "Drums, sheaves and pulleys serviceable", "critical": True},
+        {"q": "All safety devices work (overrun, brakes, gates)", "critical": True},
+        {"q": "Platform not overloaded; load limit displayed", "critical": False},
+        {"q": "Landing gates close and lock", "critical": True},
+    ]}
+
+# ---------------------------------------------------------------- appointments
+# Legal appointments "in writing". "aes": the appointment carries a signature
+# that a regulation needs, or the risk is high enough that AES is advised.
+APPOINTMENTS = {
+    "construction_manager": {"title": "Construction manager", "reg": "8(1)", "who": "user", "aes": True,
+        "duties": "Manage the construction work on site and the duties of the principal contractor under the "
+                  "Construction Regulations 2014, the client's H&S specification and the H&S plan."},
+    "construction_supervisor": {"title": "Construction supervisor", "reg": "8(7)", "who": "any", "aes": True,
+        "duties": "Supervise construction work on the site named in this appointment. Make sure the work is "
+                  "done safely, to the H&S plan and the risk assessments."},
+    "safety_officer": {"title": "Construction health and safety officer", "reg": "8(5)", "who": "user", "aes": True,
+        "duties": "Assist the principal contractor to comply with the Act and Regulations. Monitor, inspect and "
+                  "report on health and safety on site. Must be registered with the SACPCMP."},
+    "risk_assessor": {"title": "Risk assessor (competent person)", "reg": "9(1)", "who": "user", "aes": True,
+        "duties": "Perform and review the site risk assessments: identify hazards, evaluate risks with a "
+                  "documented method, and set controls, monitoring and review plans."},
+    "fall_protection": {"title": "Fall protection planner (competent person)", "reg": "10(1)(a)", "who": "any", "aes": True,
+        "duties": "Draw up, implement, amend and maintain the fall protection plan for the site."},
+    "excavation": {"title": "Excavation supervisor (competent person)", "reg": "13(1)", "who": "any", "aes": True,
+        "duties": "Supervise excavation work. Inspect every excavation daily before each shift, after blasting, "
+                  "after a fall of ground, after damage to supports and after rain. Record the results in the register."},
+    "scaffold": {"title": "Scaffold supervisor (competent person)", "reg": "16(1)", "who": "any", "aes": True,
+        "duties": "Supervise all scaffolding work. Make sure erectors, team leaders and inspectors are competent. "
+                  "Make sure scaffolds are inspected before use, weekly and after bad weather."},
+    "hoist_inspector": {"title": "Material hoist inspector (competent person)", "reg": "19(8)(a)", "who": "any", "aes": True,
+        "duties": "Inspect every material hoist daily and enter and sign the results in the record book."},
+    "operator": {"title": "Authorisation to operate plant", "reg": "23(1)(d)(i)", "who": "worker", "aes": False,
+        "duties": "Operate only the plant named in this authorisation. Do the daily pre-use check with the checklist "
+                  "and record it before use. Report defects at once and do not use defective plant."},
+    "first_aider": {"title": "First aider", "reg": "GSR 3", "who": "worker", "aes": False,
+        "duties": "Give first aid on site. Keep the first aid box complete. Keep the first aid certificate valid."},
+    "fire_fighter": {"title": "Fire fighter / fire marshal", "reg": "GSR / ERW 9", "who": "worker", "aes": False,
+        "duties": "Check fire equipment monthly. Lead fire response and evacuation on site."},
+    "hs_rep": {"title": "Health and safety representative", "reg": "OHS Act s17", "who": "worker", "aes": False,
+        "duties": "Inspect the workplace, identify hazards, investigate incidents and complaints, and represent "
+                  "employees on health and safety matters. (Required where more than 20 employees work.)"},
+}
+
+# Which appointments each site needs, by feature (None = always).
+REQUIRED_APPOINTMENTS = [
+    ("construction_manager", None), ("construction_supervisor", None), ("risk_assessor", None),
+    ("first_aider", None), ("fall_protection", "work_at_height"), ("excavation", "excavations"),
+    ("scaffold", "scaffolding"), ("hoist_inspector", "material_hoist"), ("operator", "mobile_plant"),
+]
+
+# Documents that need an advanced electronic signature (or wet ink + scan).
+AES_DOCS = {
+    "appointment": "Legal appointment",
+    "mandatary_agreement": "Section 37(2) mandatary agreement",
+    "excavation_decision": "Excavation stability decision (reg 13(2)(b)(ii)(bb))",
+    "hoist_book": "Material hoist record book entry (reg 19(8)(c))",
+    "notification": "Notification of construction work / permit application (signed)",
+    "other": "Other signed document",
+}
+
+VISITOR_RULES = """Visitor rules
+1. Stay with your host at all times.
+2. Wear the PPE you were given: hard hat, safety boots and reflective vest.
+3. Keep out of barricaded areas, excavations and the swing of machines.
+4. Do not climb scaffolds or ladders.
+5. In an emergency, go to the assembly point with your host.
+6. Report any injury or unsafe condition to your host at once."""
+
+VISITOR_PPE = ["Hard hat", "Safety boots", "Reflective vest", "Safety glasses", "Hearing protection"]
+
+ESIGN_POLICY = """Electronic signature agreement
+
+{company} and the persons who sign records in {app} agree that:
+1. Site records (task sheets, toolbox talks, inductions, checks, inspections, registers and reports) are signed electronically in the app. Each signature is captured on the device with the signer's name, the date and time, GPS where available, and where taken a photo of the signer.
+2. Such a signature identifies the signer and shows that the signer approves the content, as section 13(3) and 13(5) of the Electronic Communications and Transactions Act 25 of 2002 (ECT Act) provide.
+3. Where a law requires a signature and does not specify its type, an advanced electronic signature (AES) or a handwritten signature is used, as section 13(1) of the ECT Act requires.
+4. Records are kept as data messages in terms of sections 12, 16 and 17 of the ECT Act, with integrity protection (a hash chain), and can be printed when a person asks for paper."""
+
+WORKER_CONSENT = """I agree that:
+- I sign site records on this device. My electronic signature means the same as my handwritten signature.
+- The company keeps my name, ID number, photo, certificates and medical fitness certificate to meet the Construction Regulations 2014. Only people who manage health and safety for the company can see them. The company keeps them as long as the law requires and then deletes them. (POPIA)"""
+
+AUDIT_ITEMS = [
+    ("plan", "H&S plan approved and on site", "5(1)(l), 7(1)(a)"),
+    ("file", "H&S file on site and up to date", "7(1)(b)"),
+    ("appointments", "Legal appointments in writing", "8, 9, 13, 16, 23"),
+    ("risk", "Risk assessments by a competent person, reviewed", "9"),
+    ("induction", "All workers and visitors inducted", "7(5)-(7)"),
+    ("medicals", "Valid medical certificates (Annexure 3)", "7(8)"),
+    ("training", "Workers trained on hazards before work (task sheets, talks)", "9(3)"),
+    ("fall", "Fall protection plan in place and applied", "10"),
+    ("excavations", "Excavations inspected and recorded", "13(2)(h)"),
+    ("scaffolds", "Scaffolds inspected and tagged", "16"),
+    ("plant", "Plant pre-use checks recorded; operators authorised", "23"),
+    ("electrical", "Temporary electrical installations safe", "24"),
+    ("housekeeping", "Housekeeping and stacking", "27, 28"),
+    ("fire", "Fire equipment and first aid", "29, GSR 3"),
+    ("contractors", "Contractors appointed, COID good standing, agreements", "7(1)(c), 7(1)(f)"),
+    ("incidents", "Incidents reported and investigated", "OHS s24, GAR 8-9"),
+]

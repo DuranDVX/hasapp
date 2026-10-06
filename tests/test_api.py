@@ -199,7 +199,7 @@ def test_check_must_answer_all(co):
 def test_induction_adds_worker_to_site_and_marks_inducted(co):
     w = client.post("/api/workers", json={"name": "New Guy"}, headers=co["h"]).json()
     body = {"client_id": uuid.uuid4().hex, "site_id": co["site"]["id"], "kind": "induction",
-            "record_date": "2026-10-06", "payload": {"worker_id": w["id"]},
+            "record_date": "2026-10-06", "payload": {"worker_id": w["id"], "consent": True},
             "signatures": [sig(worker=w["id"]), sig(user=me(co["h"])["user"]["id"], role="inductor")]}
     assert client.post("/api/records", json=body, headers=co["h"]).status_code == 200
     ws = client.get(f"/api/workers?site_id={co['site']['id']}", headers=co["h"]).json()

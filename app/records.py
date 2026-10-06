@@ -19,7 +19,9 @@ from . import db, files, library
 
 KINDS = {"task_sheet": "Daily task sheet", "toolbox_talk": "Toolbox talk",
          "check": "Check / inspection", "incident": "Incident report",
-         "induction": "Site induction"}
+         "induction": "Site induction", "visitor": "Visitor induction",
+         "appointment": "Legal appointment", "audit": "Health and safety audit",
+         "audit_ack": "Audit report received", "investigation": "Incident investigation"}
 GENESIS = "0" * 64
 _chain_lock = threading.Lock()
 
@@ -175,8 +177,98 @@ def _induction(s, cid, site_id, p: dict, company: db.Company) -> dict:
     if not s.get(db.SiteWorker, (site_id, w.id)):
         s.add(db.SiteWorker(site_id=site_id, worker_id=w.id))
     text = company.induction_text or library.DEFAULT_INDUCTION
+    if not p.get("consent"):
+        raise HTTPException(400, "The worker must agree to e-signatures and the privacy notice.")
     return {"worker_id": w.id, "worker_name": w.name, "induction_text": text,
+            "consent": True, "consent_text": library.WORKER_CONSENT,
             "language": p.get("language") if p.get("language") in library.LANGUAGES else "en"}
+
+
+def _visitor(s, cid, site_id, p: dict) -> dict:
+    out = {"name": _text(p.get("name"), 200), "company": _text(p.get("company"), 200),
+           "phone": _text(p.get("phone"), 40), "id_number": _text(p.get("id_number"), 40),
+           "purpose": _text(p.get("purpose"), 300), "host": _text(p.get("host"), 200),
+           "ppe": [x for x in (p.get("ppe") or []) if x in library.VISITOR_PPE],
+           "rules_text": library.VISITOR_RULES, "time_in": _text(p.get("time_in"), 40)}
+    if not out["name"]:
+        raise HTTPException(400, "Give the visitor's name.")
+    if not out["ppe"]:
+        raise HTTPException(400, "Tick the PPE the visitor received (reg 7(6)).")
+    return out
+
+
+def _appointment(s, cid, site_id, p: dict) -> dict:
+    t = library.APPOINTMENTS.get(p.get("type"))
+    if not t:
+        raise HTTPException(400, "Pick the appointment type.")
+    who = p.get("appointee") or {}
+    name, wid, uid = _text(who.get("name"), 200), None, None
+    if who.get("worker_id"):
+        w = s.get(db.Worker, who["worker_id"])
+        if not w or w.company_id != cid:
+            raise HTTPException(400, "Unknown worker.")
+        wid, name = w.id, w.name
+    elif who.get("user_id"):
+        u = s.get(db.User, who["user_id"])
+        if not u or u.company_id != cid:
+            raise HTTPException(400, "Unknown user.")
+        uid, name = u.id, u.name
+    if not name:
+        raise HTTPException(400, "Choose the person to appoint.")
+    return {"type": p["type"], "title": t["title"], "reg": t["reg"], "duties": t["duties"],
+            "aes_required": t["aes"], "appointee": {"name": name, "worker_id": wid, "user_id": uid},
+            "scope": _text(p.get("scope"), 1000), "start_date": _text(p.get("start_date"), 10),
+            "end_date": _text(p.get("end_date"), 10)}
+
+
+def _audit(s, cid, site_id, p: dict) -> dict:
+    answers = {a.get("key"): a for a in (p.get("items") or []) if isinstance(a, dict)}
+    items, ok, gap = [], 0, 0
+    for key, title, reg in library.AUDIT_ITEMS:
+        a = answers.get(key) or {}
+        res = a.get("result") if a.get("result") in ("ok", "gap", "na") else None
+        if res is None:
+            raise HTTPException(400, f"Answer every audit item ({title}).")
+        ok += res == "ok"
+        gap += res == "gap"
+        items.append({"key": key, "title": title, "reg": reg, "result": res, "note": _text(a.get("note"), 500)})
+    findings = [{"finding": _text(f.get("finding"), 500), "action": _text(f.get("action"), 500),
+                 "owner": _text(f.get("owner"), 200), "due": _text(f.get("due"), 10)}
+                for f in (p.get("findings") or [])[:50] if isinstance(f, dict) and _text(f.get("finding"))]
+    score = round(100 * ok / (ok + gap)) if ok + gap else 100
+    return {"period": _text(p.get("period"), 60), "items": items, "findings": findings, "score": score,
+            "board": p.get("board") if isinstance(p.get("board"), dict) else {},
+            "report_due": _text(p.get("report_due"), 10), "notes": _text(p.get("notes"), 2000)}
+
+
+def _audit_ack(s, cid, site_id, p: dict) -> dict:
+    a = s.get(db.Record, p.get("audit_id") or "")
+    if not a or a.company_id != cid or a.kind != "audit":
+        raise HTTPException(400, "Unknown audit.")
+    return {"audit_id": a.id, "audit_date": a.record_date.isoformat(), "score": a.payload.get("score")}
+
+
+def _investigation(s, cid, site_id, p: dict) -> dict:
+    inc = s.get(db.Record, p.get("incident_id") or "")
+    if not inc or inc.company_id != cid or inc.kind != "incident":
+        raise HTTPException(400, "Unknown incident.")
+    def _rep(x):
+        x = x if isinstance(x, dict) else {}
+        return {"date": _text(x.get("date"), 10), "ref": _text(x.get("ref"), 100)}
+    out = {"incident_id": inc.id, "incident_date": inc.record_date.isoformat(),
+           "incident_summary": _text(inc.payload.get("description"), 300),
+           "findings": _text(p.get("findings"), 4000),
+           "root_causes": [_text(x, 300) for x in (p.get("root_causes") or [])[:10] if _text(x)],
+           "actions": [{"action": _text(a.get("action"), 500), "owner": _text(a.get("owner"), 200),
+                        "due": _text(a.get("due"), 10)} for a in (p.get("actions") or [])[:20]
+                       if isinstance(a, dict) and _text(a.get("action"))],
+           "reportable": bool(p.get("reportable")), "not_reportable_reason": _text(p.get("not_reportable_reason"), 500),
+           "reported_dol": _rep(p.get("reported_dol")), "reported_cf": _rep(p.get("reported_cf"))}
+    if not out["findings"]:
+        raise HTTPException(400, "Write the investigation findings.")
+    if out["reportable"] and not out["reported_dol"]["date"]:
+        raise HTTPException(400, "Give the date it was reported to the Department of Employment and Labour.")
+    return out
 
 
 # ---------------------------------------------------------------- hashing
@@ -235,7 +327,12 @@ def create(ctx, body: dict) -> str:
                    "toolbox_talk": lambda: _toolbox_talk(s, cid, site.id, p),
                    "check": lambda: _check(s, cid, site.id, p),
                    "incident": lambda: _incident(s, cid, site.id, p),
-                   "induction": lambda: _induction(s, cid, site.id, p, company)}[kind]()
+                   "induction": lambda: _induction(s, cid, site.id, p, company),
+                   "visitor": lambda: _visitor(s, cid, site.id, p),
+                   "appointment": lambda: _appointment(s, cid, site.id, p),
+                   "audit": lambda: _audit(s, cid, site.id, p),
+                   "audit_ack": lambda: _audit_ack(s, cid, site.id, p),
+                   "investigation": lambda: _investigation(s, cid, site.id, p)}[kind]()
         payload = _store_files(cid, payload)
         audio = ""
         if body.get("audio"):
@@ -328,6 +425,16 @@ def summary(rec: db.Record) -> str:
         return f"{library.INCIDENT_TYPES.get(p.get('type'), 'Incident')}: {p.get('description', '')[:80]}"
     if rec.kind == "induction":
         return p.get("worker_name", "")
+    if rec.kind == "visitor":
+        return f"{p.get('name')} ({p.get('company') or 'visitor'}) · host {p.get('host') or '-'}"
+    if rec.kind == "appointment":
+        return f"{p.get('title')}: {p.get('appointee', {}).get('name', '')}"
+    if rec.kind == "audit":
+        return f"Score {p.get('score')}% · {len(p.get('findings', []))} finding(s)"
+    if rec.kind == "audit_ack":
+        return f"Report of audit {p.get('audit_date')} received"
+    if rec.kind == "investigation":
+        return f"Incident {p.get('incident_date')}: " + ("reported" if p.get("reportable") else "not reportable")
     return ""
 
 

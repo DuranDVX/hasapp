@@ -13,12 +13,12 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from fastapi import Body, Depends, FastAPI, File, Form, Header, HTTPException, Query, Request, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from . import ai, auth, config, db, files, library, mailer, pdf, records, stt, tts
+from . import aes, ai, auth, compliance, config, db, files, library, mailer, pdf, records, stt, tts
 from .auth import Ctx, current
 
 logging.basicConfig(level=logging.INFO)
@@ -179,7 +179,28 @@ def site_d(x: db.Site) -> dict:
     return {"id": x.id, "name": x.name, "address": x.address, "client": x.client,
             "client_agent": x.client_agent, "emergency": x.emergency,
             "start_date": x.start_date.isoformat() if x.start_date else "",
-            "end_date": x.end_date.isoformat() if x.end_date else "", "status": x.status}
+            "end_date": x.end_date.isoformat() if x.end_date else "", "status": x.status,
+            "features": x.features or {}, "print_required": bool(x.print_required)}
+
+
+def contractor_d(c: db.Contractor) -> dict:
+    return {"id": c.id, "site_id": c.site_id, "name": c.name, "reg_no": c.reg_no, "scope": c.scope,
+            "contact": c.contact, "phone": c.phone, "email": c.email,
+            "coid_expires": c.coid_expires.isoformat() if c.coid_expires else "",
+            "coid_status": _expiry(c.coid_expires) if c.coid_file else "missing",
+            "coid_url": files.sign(c.coid_file), "appointed_on": c.appointed_on.isoformat() if c.appointed_on else "",
+            "hs_plan_ok": c.hs_plan_ok, "active": c.active}
+
+
+def aes_d(a: db.AesDoc) -> dict:
+    return {"id": a.id, "site_id": a.site_id, "record_id": a.record_id, "contractor_id": a.contractor_id,
+            "kind": a.kind, "kind_label": library.AES_DOCS.get(a.kind, a.kind), "title": a.title,
+            "signers": a.signers, "status": a.status, "method": a.method, "signatures": a.signatures,
+            "summary": aes.summary({"signatures": a.signatures}) if a.method == "aes" else
+                       ("Wet-ink scan uploaded." if a.method == "wet_ink" else "Waiting for signature."),
+            "note": a.note, "original_url": files.sign(a.original_file), "signed_url": files.sign(a.signed_file),
+            "created_at": a.created_at.date().isoformat(),
+            "signed_at": a.signed_at.date().isoformat() if a.signed_at else ""}
 
 
 def cred_d(c: db.Credential) -> dict:
@@ -393,6 +414,10 @@ def _site_fields(x: db.Site, body: dict) -> None:
             setattr(x, k, _date(body[k], k))
     if body.get("status") in ("active", "closed"):
         x.status = body["status"]
+    if isinstance(body.get("features"), dict):
+        x.features = {k: bool(v) for k, v in body["features"].items() if k in library.SITE_FEATURES}
+    if "print_required" in body:
+        x.print_required = bool(body["print_required"])
     if not x.name:
         raise HTTPException(400, "The site needs a name.")
 
@@ -764,6 +789,13 @@ def sync(site_id: str, ctx: Ctx = Depends(current)):
                 "tts_languages": [l for l in library.TTS_VOICES if tts.enabled(l)],
                 "incident_types": library.INCIDENT_TYPES, "credential_kinds": library.CREDENTIAL_KINDS,
                 "file_sections": library.FILE_SECTIONS,
+                "site_features": library.SITE_FEATURES, "appointments": library.APPOINTMENTS,
+                "visitor_ppe": library.VISITOR_PPE, "visitor_rules": library.VISITOR_RULES,
+                "audit_items": library.AUDIT_ITEMS, "aes_kinds": library.AES_DOCS,
+                "worker_consent": library.WORKER_CONSENT, "inspection_schedule": library.INSPECTION_SCHEDULE,
+                "esign_accepted": bool(ctx.company.esign_accepted_at),
+                "contractors": [contractor_d(c) for c in s.scalars(select(db.Contractor).where(
+                    db.Contractor.site_id == site.id, db.Contractor.active))],
                 "induction_text": ctx.company.induction_text or library.DEFAULT_INDUCTION,
                 "recent": [records.to_dict(r, full=False) for r in recent],
                 "today": today().isoformat(), "synced_at": db.utcnow().isoformat() + "Z"}
@@ -826,10 +858,21 @@ def dashboard(site_id: str, ctx: Ctx = Depends(current)):
 
 @app.post("/api/records")
 def create_record(body: dict = Body(...), ctx: Ctx = Depends(current)):
-    ctx.need(*auth.WRITE)
+    if body.get("kind") == "audit":
+        ctx.need(*auth.WRITE, "auditor")
+    else:
+        ctx.need(*auth.WRITE)
     rid = records.create(ctx, body)
     with db.session() as s:
         rec = s.get(db.Record, rid)
+        if rec.kind == "appointment" and rec.payload.get("aes_required") and not s.scalar(
+                select(db.AesDoc.id).where(db.AesDoc.record_id == rec.id)):
+            site = s.get(db.Site, rec.site_id)
+            data = pdf.record_pdf(rec, ctx.company, site, printed=False)
+            s.add(db.AesDoc(company_id=ctx.cid, site_id=rec.site_id, record_id=rec.id, kind="appointment",
+                            title=f"Appointment: {rec.payload['title']} ({rec.payload['appointee']['name']})",
+                            signers=[f"{ctx.user.name} (appointer)", f"{rec.payload['appointee']['name']} (appointee)"],
+                            original_file=files.put(ctx.cid, data, "application/pdf")))
         return records.to_dict(rec, full=False)
 
 
@@ -858,14 +901,362 @@ def get_record(rid: str, ctx: Ctx = Depends(current)):
 
 
 @app.get("/api/records/{rid}/pdf")
-def record_pdf(rid: str, ctx: Ctx = Depends(current)):
+def record_pdf(rid: str, print: int = 0, ctx: Ctx = Depends(current)):
     with db.session() as s:
         rec = _get(s, db.Record, rid, ctx, "Record")
         site = s.get(db.Site, rec.site_id)
-        data = pdf.record_pdf(rec, ctx.company, site)
+        data = pdf.record_pdf(rec, ctx.company, site, printed=bool(print))
         name = f"{rec.kind}-{rec.record_date}-{rec.seq}.pdf"
         return Response(data, media_type="application/pdf",
                         headers={"Content-Disposition": f'inline; filename="{name}"'})
+
+
+@app.get("/api/records/{rid}/annexure1.pdf")
+def annexure1_pdf(rid: str, ctx: Ctx = Depends(current)):
+    with db.session() as s:
+        inc = _get(s, db.Record, rid, ctx, "Record")
+        if inc.kind != "incident":
+            raise HTTPException(400, "Annexure 1 is for incident records.")
+        site = s.get(db.Site, inc.site_id)
+        inv = next((r for r in s.scalars(select(db.Record).where(db.Record.company_id == ctx.cid,
+                                                                  db.Record.kind == "investigation")
+                                         .options(selectinload(db.Record.signatures)))
+                    if r.payload.get("incident_id") == inc.id), None)
+        ids = [x.get("worker_id") for x in inc.payload.get("people", []) if x.get("worker_id")]
+        info = {w.id: {"id_number": w.id_number, "trade": w.trade}
+                for w in s.scalars(select(db.Worker).where(db.Worker.company_id == ctx.cid, db.Worker.id.in_(ids or [""])))}
+        data = pdf.annexure1(ctx.company, site, inc, inv, info)
+    return Response(data, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="Annexure1-{inc.record_date}.pdf"'})
+
+
+# ---------------------------------------------------------------- Site Board
+
+@app.get("/api/board")
+def site_board(site_id: str, ctx: Ctx = Depends(current)):
+    with db.session() as s:
+        site = _get(s, db.Site, site_id, ctx, "Site")
+        company = s.get(db.Company, ctx.cid)
+        return compliance.board(s, company, site, today(), datetime.now(SA).hour)
+
+
+@app.get("/api/esign")
+def esign_policy(ctx: Ctx = Depends(current)):
+    c = ctx.company
+    return {"text": library.ESIGN_POLICY.format(company=c.name, app=config.APP_NAME),
+            "accepted": bool(c.esign_accepted_at), "accepted_by": c.esign_accepted_by,
+            "accepted_at": c.esign_accepted_at.isoformat() if c.esign_accepted_at else ""}
+
+
+@app.post("/api/esign/accept")
+def esign_accept(ctx: Ctx = Depends(current)):
+    ctx.need("owner")
+    with db.session() as s:
+        c = s.get(db.Company, ctx.cid)
+        c.esign_accepted_at = db.utcnow()
+        c.esign_accepted_by = f"{ctx.user.name} ({ctx.user.email})"
+        return {"ok": True}
+
+
+# ---------------------------------------------------------------- contractors
+
+def _contractor_fields(c: db.Contractor, body: dict, cid: str) -> None:
+    for k, n in (("name", 200), ("reg_no", 60), ("contact", 200), ("phone", 40), ("email", 200)):
+        if k in body:
+            setattr(c, k, _s(body[k], n))
+    if "scope" in body:
+        c.scope = _s(body["scope"], 2000)
+    if "coid_expires" in body:
+        c.coid_expires = _date(body["coid_expires"], "COID expiry date")
+    if "appointed_on" in body:
+        c.appointed_on = _date(body["appointed_on"], "appointment date")
+    if "hs_plan_ok" in body:
+        c.hs_plan_ok = bool(body["hs_plan_ok"])
+    if "active" in body:
+        c.active = bool(body["active"])
+    if body.get("coid_file"):
+        try:
+            c.coid_file = files.put_data_url(cid, body["coid_file"])
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+    if not c.name:
+        raise HTTPException(400, "Give the contractor's name.")
+
+
+@app.get("/api/contractors")
+def list_contractors(site_id: str, ctx: Ctx = Depends(current)):
+    with db.session() as s:
+        _get(s, db.Site, site_id, ctx, "Site")
+        return [contractor_d(c) for c in s.scalars(select(db.Contractor).where(
+            db.Contractor.company_id == ctx.cid, db.Contractor.site_id == site_id).order_by(db.Contractor.name))]
+
+
+@app.post("/api/contractors")
+def add_contractor(body: dict = Body(...), ctx: Ctx = Depends(current)):
+    ctx.need(*auth.WRITE)
+    with db.session() as s:
+        site = _get(s, db.Site, body.get("site_id", ""), ctx, "Site")
+        c = db.Contractor(company_id=ctx.cid, site_id=site.id, name="")
+        _contractor_fields(c, body, ctx.cid)
+        s.add(c)
+        s.flush()
+        return contractor_d(c)
+
+
+@app.put("/api/contractors/{cid_}")
+def update_contractor(cid_: str, body: dict = Body(...), ctx: Ctx = Depends(current)):
+    ctx.need(*auth.WRITE)
+    with db.session() as s:
+        c = _get(s, db.Contractor, cid_, ctx, "Contractor")
+        _contractor_fields(c, body, ctx.cid)
+        return contractor_d(c)
+
+
+@app.post("/api/contractors/{cid_}/agreement")
+def contractor_agreement(cid_: str, body: dict = Body(default={}), ctx: Ctx = Depends(current)):
+    """Issue a section 37(2) mandatary agreement for advanced e-signature."""
+    ctx.need(*auth.MANAGE)
+    with db.session() as s:
+        c = _get(s, db.Contractor, cid_, ctx, "Contractor")
+        site = s.get(db.Site, c.site_id)
+        a = db.AesDoc(id=db.new_id(), company_id=ctx.cid, site_id=site.id, contractor_id=c.id,
+                      kind="mandatary_agreement", title=f"Section 37(2) agreement: {c.name}",
+                      signers=[f"{_s(body.get('pc_signer')) or ctx.user.name} for {ctx.company.name}",
+                               f"{_s(body.get('contractor_signer')) or c.contact or '__________'} for {c.name}"])
+        data = pdf.aes_document(ctx.company, site, a.title, pdf.mandatary_agreement_body(ctx.company, site, c),
+                                a.signers, a.id)
+        a.original_file = files.put(ctx.cid, data, "application/pdf")
+        s.add(a)
+        s.flush()
+        return aes_d(a)
+
+
+# ---------------------------------------------------------------- AES documents
+
+@app.get("/api/aes")
+def list_aes(site_id: str = "", ctx: Ctx = Depends(current)):
+    with db.session() as s:
+        q = select(db.AesDoc).where(db.AesDoc.company_id == ctx.cid)
+        if site_id:
+            q = q.where((db.AesDoc.site_id == site_id) | (db.AesDoc.site_id.is_(None)))
+        return [aes_d(a) for a in s.scalars(q.order_by(db.AesDoc.created_at.desc()))]
+
+
+@app.post("/api/aes")
+def add_aes(body: dict = Body(...), ctx: Ctx = Depends(current)):
+    """Issue a document for AES: an excavation decision, a hoist record entry, or any PDF."""
+    ctx.need(*auth.MANAGE)
+    kind = body.get("kind")
+    if kind not in library.AES_DOCS:
+        raise HTTPException(400, "Pick the document type.")
+    signers = [_s(x) for x in (body.get("signers") or []) if _s(x)][:6]
+    if not signers:
+        raise HTTPException(400, "Name at least one person who must sign.")
+    with db.session() as s:
+        site = _get(s, db.Site, body.get("site_id", ""), ctx, "Site")
+        a = db.AesDoc(id=db.new_id(), company_id=ctx.cid, site_id=site.id, kind=kind,
+                      title=_s(body.get("title"), 300) or library.AES_DOCS[kind], signers=signers)
+        if body.get("file"):
+            try:
+                a.original_file = files.put_data_url(ctx.cid, body["file"])
+            except ValueError as e:
+                raise HTTPException(400, str(e))
+            if not a.original_file.endswith(".pdf"):
+                raise HTTPException(400, "Upload a PDF to sign.")
+        else:
+            fields = body.get("fields") or {}
+            flow = pdf.excavation_decision_body(fields) if kind == "excavation_decision" \
+                else pdf.text_body(_s(body.get("text"), 20000) or a.title)
+            a.original_file = files.put(ctx.cid, pdf.aes_document(ctx.company, site, a.title, flow, signers, a.id),
+                                        "application/pdf")
+        s.add(a)
+        s.flush()
+        return aes_d(a)
+
+
+@app.post("/api/aes/{aid}/signed")
+def upload_signed(aid: str, body: dict = Body(...), ctx: Ctx = Depends(current)):
+    ctx.need(*auth.WRITE)
+    method = body.get("method")
+    if method not in ("aes", "wet_ink"):
+        raise HTTPException(400, "Say how it was signed: AES or wet ink.")
+    if not body.get("file"):
+        raise HTTPException(400, "Choose the signed file.")
+    with db.session() as s:
+        a = _get(s, db.AesDoc, aid, ctx, "Document")
+        try:
+            name = files.put_data_url(ctx.cid, body["file"])
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        if method == "aes":
+            if not name.endswith(".pdf"):
+                raise HTTPException(400, "An AES-signed document must be a PDF.")
+            orig = files.read(a.original_file) if a.original_file else None
+            res = aes.inspect(files.read(name), orig)
+            good = [x for x in res["signatures"] if x.get("intact") and x.get("valid")]
+            if not good:
+                raise HTTPException(400, res["error"] or "No intact digital signature found in this PDF. "
+                                    "Upload the PDF exactly as the signing service returned it, or choose wet ink.")
+            a.signatures = res["signatures"]
+            a.note = ("Contains the original document unchanged. " if res["contains_original"] else "") + aes.summary(res)
+        else:
+            a.signatures, a.note = [], _s(body.get("note"), 500) or "Wet-ink signatures; scan uploaded."
+        a.signed_file, a.method, a.status, a.signed_at = name, method, "signed", db.utcnow()
+        a.uploaded_by = ctx.user.name
+        return aes_d(a)
+
+
+# ---------------------------------------------------------------- print centre
+
+PRINT_PACKS = {
+    "task_sheet": "Daily task sheets", "toolbox_talk": "Toolbox talks", "incident": "Incident reports",
+    "investigation": "Incident investigations", "audit": "Audit reports", "appointment": "Legal appointments",
+    "induction": "Inductions (full records)", "check": "Checks and inspections (full records)",
+    "induction_register": "Induction register", "visitor_register": "Visitor register",
+    "check_register": "Plant and inspection register",
+}
+
+
+@app.get("/api/print/packs")
+def print_packs(ctx: Ctx = Depends(current)):
+    return PRINT_PACKS
+
+
+@app.get("/api/sites/{sid}/print.pdf")
+def print_pack(sid: str, what: str, date_from: str = "", date_to: str = "", template: str = "",
+               ctx: Ctx = Depends(current)):
+    if what not in PRINT_PACKS:
+        raise HTTPException(400, "Unknown print pack.")
+    with db.session() as s:
+        site = _get(s, db.Site, sid, ctx, "Site")
+        d0 = _date(date_from) or site.start_date or date(2000, 1, 1)
+        d1 = _date(date_to) or today()
+        kind = {"induction_register": "induction", "visitor_register": "visitor", "check_register": "check"}.get(what, what)
+        recs = s.scalars(select(db.Record).where(db.Record.site_id == site.id, db.Record.kind == kind,
+                                                 db.Record.record_date >= d0, db.Record.record_date <= d1)
+                         .options(selectinload(db.Record.signatures))
+                         .order_by(db.Record.record_date, db.Record.seq)).all()
+        if template:
+            recs = [r for r in recs if r.payload.get("template") == template]
+        title, sub = PRINT_PACKS[what], f"{d0} to {d1}"
+        first = lambda r: r.signatures[0] if r.signatures else None
+        if what == "induction_register":
+            rows = [[str(r.record_date), r.payload.get("worker_name", ""), r.created_name,
+                     pdf.sig_img(first(r).image_file if first(r) else ""), r.hash[:12]] for r in recs]
+            data = pdf.register_pdf(ctx.company, site, title, sub, ["Date", "Worker", "Inducted by", "Worker signature", "Record"],
+                                    rows, [25, 70, 55, 50, 40])
+        elif what == "visitor_register":
+            rows = [[str(r.record_date), r.payload.get("time_in", "")[11:16], r.payload.get("name", ""),
+                     r.payload.get("company", ""), r.payload.get("purpose", ""), r.payload.get("host", ""),
+                     ", ".join(r.payload.get("ppe", [])), pdf.sig_img(first(r).image_file if first(r) else "")] for r in recs]
+            data = pdf.register_pdf(ctx.company, site, title, sub,
+                                    ["Date", "In", "Visitor", "Company", "Purpose", "Host", "PPE", "Signature"],
+                                    rows, [22, 12, 40, 35, 45, 30, 45, 40])
+        elif what == "check_register":
+            res = {"pass": "Pass", "defects": "Defects", "fail": "FAIL"}
+            rows = []
+            for r in recs:
+                p = r.payload
+                defects = "; ".join(f"{i['q']}: {i.get('note', '')}" for i in p.get("items", []) if i["answer"] == "defect")
+                g = first(r)
+                rows.append([str(r.record_date), p.get("title", ""), (p.get("plant_name") or p.get("location") or ""),
+                             res.get(p.get("result"), ""), defects or "-", g.name if g else "",
+                             pdf.sig_img(g.image_file if g else "")])
+            data = pdf.register_pdf(ctx.company, site, title, sub,
+                                    ["Date", "Checklist", "Item / place", "Result", "Defects", "By", "Signature"],
+                                    rows, [22, 45, 40, 18, 70, 35, 40])
+        else:
+            data = pdf.records_pdf(recs, ctx.company, site, f"{title} · {sub}", printed=True)
+    fname = re.sub(r"[^\w-]+", "-", f"{title}-{site.name}")[:60]
+    return Response(data, media_type="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{fname}.pdf"'})
+
+
+# ---------------------------------------------------------------- public verification of a print
+
+@app.get("/v/{rid}", include_in_schema=False)
+def verify_print(rid: str, h: str = ""):
+    """Anyone holding a print can check it against the electronic original.
+
+    Shows no personal information: only the record type, date, number and
+    whether the stored record is intact and matches the printed hash.
+    """
+    with db.session() as s:
+        rec = s.get(db.Record, rid)
+        ok = bool(rec) and len(h) >= 12 and rec.hash.startswith(h)
+        intact = False
+        if rec:
+            prev = rec.prev_hash
+            intact = records.compute_hash(prev, rec) == rec.hash
+    if not rec:
+        title, msg, color = "Not found", "There is no record with this code.", "#b3261e"
+    elif ok and intact:
+        title, msg, color = "Verified", (f"This {records.KINDS[rec.kind].lower()} of {rec.record_date} "
+                                         f"(record #{rec.seq}) matches the electronic original. "
+                                         "The original has not been changed since it was signed."), "#12895a"
+    elif not intact:
+        title, msg, color = "Changed", "The stored record does not match its own hash. Report this.", "#b3261e"
+    else:
+        title, msg, color = "Does not match", "This print does not match the electronic original.", "#b3261e"
+    html_ = f"""<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title} · {config.APP_NAME}</title><style>body{{font:17px/1.5 -apple-system,Segoe UI,Roboto,sans-serif;margin:0;background:#f3f5f8;color:#14202b}}
+main{{max-width:520px;margin:40px auto;padding:0 16px}}.card{{background:#fff;border-radius:16px;padding:22px;border-top:8px solid {color}}}
+h1{{margin:0 0 8px;color:{color}}}small{{color:#5d6c7b}}</style></head><body><main><div class="card"><h1>{title}</h1>
+<p>{msg}</p><small>{config.APP_NAME} record verification · hash {(rec.hash[:16] + '…') if rec else '-'}</small></div></main></body></html>"""
+    return HTMLResponse(html_, headers={"Cache-Control": "no-store", "X-Robots-Tag": "noindex"})
+
+
+# ---------------------------------------------------------------- incidents and audits helpers
+
+@app.get("/api/incidents")
+def list_incidents(site_id: str, ctx: Ctx = Depends(current)):
+    with db.session() as s:
+        _get(s, db.Site, site_id, ctx, "Site")
+        recs = s.scalars(select(db.Record).where(db.Record.site_id == site_id,
+                                                 db.Record.kind.in_(("incident", "investigation")))
+                         .options(selectinload(db.Record.signatures))
+                         .order_by(db.Record.record_date.desc())).all()
+        inv = {r.payload.get("incident_id"): r for r in recs if r.kind == "investigation"}
+        out = []
+        for r in recs:
+            if r.kind != "incident":
+                continue
+            i = inv.get(r.id)
+            out.append(records.to_dict(r, False) | {
+                "type": r.payload.get("type"), "possibly_reportable": r.payload.get("possibly_reportable"),
+                "investigation_id": i.id if i else "", "days_open": (today() - r.record_date).days,
+                "due": (r.record_date + timedelta(days=7)).isoformat()})
+        return out
+
+
+AUDIT_MAP = {"plan": ["hs_plan"], "file": ["client_spec", "notification"], "appointments": ["appointments"],
+             "risk": ["risk"], "induction": ["inductions", "visitors"], "medicals": ["medicals"],
+             "training": ["task_sheet", "toolbox_talk", "certificates"], "fall": ["fall_plan"],
+             "excavations": ["insp_excavation"], "scaffolds": ["insp_scaffold"],
+             "plant": ["plant_checks", "operators"], "electrical": ["insp_electrical_db"],
+             "fire": ["insp_fire_extinguisher", "insp_first_aid"], "contractors": ["contractors"],
+             "incidents": ["incidents"], "housekeeping": []}
+
+
+@app.get("/api/audit/prefill")
+def audit_prefill(site_id: str, ctx: Ctx = Depends(current)):
+    """Start an audit from the Site Board: red tiles become gaps the auditor confirms."""
+    with db.session() as s:
+        site = _get(s, db.Site, site_id, ctx, "Site")
+        b = compliance.board(s, s.get(db.Company, ctx.cid), site, today(), 12)
+    st = {t["key"]: t for t in b["tiles"]}
+    items = []
+    for key, title, reg in library.AUDIT_ITEMS:
+        tl = [st[k] for k in AUDIT_MAP.get(key, []) if k in st]
+        if not tl:
+            res, note = ("na" if AUDIT_MAP.get(key) else ""), ""
+        elif any(t["status"] == "red" for t in tl):
+            res, note = "gap", "; ".join(t["detail"] for t in tl if t["status"] == "red")
+        else:
+            res, note = "ok", ""
+        items.append({"key": key, "title": title, "reg": reg, "result": res, "note": note})
+    return {"items": items, "board": {"counts": b["counts"], "date": b["date"]},
+            "report_due": (today() + timedelta(days=7)).isoformat()}
 
 
 @app.get("/api/verify")
@@ -893,9 +1284,14 @@ def safety_file(sid: str, date_from: str = "", date_to: str = "", ctx: Ctx = Dep
         recs = s.scalars(select(db.Record).where(db.Record.site_id == site.id, db.Record.record_date >= d0,
                                                  db.Record.record_date <= d1)
                          .options(selectinload(db.Record.signatures))).all()
+        aes_docs = s.scalars(select(db.AesDoc).where(db.AesDoc.company_id == ctx.cid,
+                                                     (db.AesDoc.site_id == site.id) | (db.AesDoc.site_id.is_(None)))
+                             .order_by(db.AesDoc.created_at)).all()
+        contractors = s.scalars(select(db.Contractor).where(db.Contractor.site_id == site.id,
+                                                            db.Contractor.active).order_by(db.Contractor.name)).all()
         data = pdf.safety_file(ctx.company, site, date_from=d0, date_to=d1, docs=docs, workers=workers,
                                inducted=_inducted(s, site.id), risks=risks, recs=recs,
-                               chain=records.verify(ctx.cid))
+                               chain=records.verify(ctx.cid), aes_docs=aes_docs, contractors=contractors)
     name = re.sub(r"[^\w-]+", "-", site.name)[:40]
     return Response(data, media_type="application/pdf",
                     headers={"Content-Disposition": f'attachment; filename="Safety-file-{name}-{d1}.pdf"'})

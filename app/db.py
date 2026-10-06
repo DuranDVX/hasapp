@@ -8,7 +8,7 @@ from contextlib import contextmanager
 from datetime import date, datetime, timezone
 
 from sqlalchemy import (JSON, Boolean, Date, DateTime, Float, ForeignKey, Integer,
-                        String, Text, UniqueConstraint, create_engine, event)
+                        String, Text, UniqueConstraint, create_engine, event, inspect, text)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship, sessionmaker
 
 from . import config
@@ -37,6 +37,8 @@ class Company(Base):
     coid_no: Mapped[str] = mapped_column(String(60), default="")
     logo_file: Mapped[str] = mapped_column(String(200), default="")
     induction_text: Mapped[str] = mapped_column(Text, default="")
+    esign_accepted_by: Mapped[str] = mapped_column(String(200), default="")   # ECT s13(3) agreement
+    esign_accepted_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
 
 
@@ -74,7 +76,56 @@ class Site(Base):
     start_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     status: Mapped[str] = mapped_column(String(20), default="active")   # active | closed
+    features: Mapped[dict] = mapped_column(JSON, default=dict)          # library.SITE_FEATURES -> bool
+    print_required: Mapped[bool] = mapped_column(Boolean, default=False)  # client wants paper copies
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class Contractor(Base):
+    """A subcontractor on one site: reg 7(1)(c) and 7(1)(f)."""
+    __tablename__ = "contractors"
+    id: Mapped[str] = mapped_column(String(16), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id"), index=True)
+    site_id: Mapped[str] = mapped_column(ForeignKey("sites.id"), index=True)
+    name: Mapped[str] = mapped_column(String(200))
+    reg_no: Mapped[str] = mapped_column(String(60), default="")
+    scope: Mapped[str] = mapped_column(Text, default="")
+    contact: Mapped[str] = mapped_column(String(200), default="")
+    phone: Mapped[str] = mapped_column(String(40), default="")
+    email: Mapped[str] = mapped_column(String(200), default="")
+    coid_expires: Mapped[date | None] = mapped_column(Date, nullable=True)
+    coid_file: Mapped[str] = mapped_column(String(200), default="")
+    appointed_on: Mapped[date | None] = mapped_column(Date, nullable=True)     # appointed in writing
+    hs_plan_ok: Mapped[bool] = mapped_column(Boolean, default=False)          # plan received and approved
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+
+
+class AesDoc(Base):
+    """A document that needs an advanced electronic signature (or wet ink).
+
+    The app issues the PDF; the signer signs it with an accredited AES
+    (LAWtrust AeSign, for example through SigniFlow) or by hand; the signed
+    PDF comes back and the server records what it finds in it.
+    """
+    __tablename__ = "aes_docs"
+    id: Mapped[str] = mapped_column(String(16), primary_key=True, default=new_id)
+    company_id: Mapped[str] = mapped_column(ForeignKey("companies.id"), index=True)
+    site_id: Mapped[str | None] = mapped_column(ForeignKey("sites.id"), nullable=True)
+    record_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    contractor_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    kind: Mapped[str] = mapped_column(String(40))
+    title: Mapped[str] = mapped_column(String(300))
+    signers: Mapped[list] = mapped_column(JSON, default=list)          # names expected to sign
+    original_file: Mapped[str] = mapped_column(String(200), default="")
+    signed_file: Mapped[str] = mapped_column(String(200), default="")
+    method: Mapped[str] = mapped_column(String(20), default="")        # aes | wet_ink
+    status: Mapped[str] = mapped_column(String(20), default="awaiting")   # awaiting | signed
+    signatures: Mapped[list] = mapped_column(JSON, default=list)        # what the PDF check found
+    note: Mapped[str] = mapped_column(Text, default="")
+    uploaded_by: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    signed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
 
 class Worker(Base):
@@ -85,6 +136,7 @@ class Worker(Base):
     id_number: Mapped[str] = mapped_column(String(40), default="")   # personal info (POPIA)
     trade: Mapped[str] = mapped_column(String(100), default="")
     employer: Mapped[str] = mapped_column(String(200), default="")   # blank = own staff
+    contractor_id: Mapped[str | None] = mapped_column(String(16), nullable=True)
     phone: Mapped[str] = mapped_column(String(40), default="")
     emergency_contact: Mapped[str] = mapped_column(String(200), default="")
     language: Mapped[str] = mapped_column(String(20), default="en")
@@ -225,6 +277,39 @@ SessionLocal = sessionmaker(engine, expire_on_commit=False)
 
 def init() -> None:
     Base.metadata.create_all(engine)
+    _add_missing_columns()
+
+
+def _add_missing_columns() -> None:
+    """Additive schema changes for existing databases: add new columns.
+
+    create_all() makes new tables but never changes old ones. Until the first
+    real migration needs Alembic, new columns must be nullable or have a
+    simple default, and this adds them.
+    """
+    insp = inspect(engine)
+    with engine.begin() as conn:
+        for table in Base.metadata.sorted_tables:
+            if not insp.has_table(table.name):
+                continue
+            have = {c["name"] for c in insp.get_columns(table.name)}
+            for col in table.columns:
+                if col.name in have:
+                    continue
+                ddl = col.type.compile(dialect=engine.dialect)
+                default = ""
+                d = col.default.arg if col.default is not None and not callable(col.default.arg) else None
+                if isinstance(d, bool):
+                    default = f" DEFAULT {'TRUE' if d else 'FALSE'}" if engine.dialect.name == "postgresql" else f" DEFAULT {int(d)}"
+                elif isinstance(d, (int, float)):
+                    default = f" DEFAULT {d}"
+                elif isinstance(d, str):
+                    default = " DEFAULT '" + d.replace("'", "''") + "'"
+                elif col.name in ("features",):
+                    default = " DEFAULT '{}'"
+                elif col.name in ("signers", "signatures"):
+                    default = " DEFAULT '[]'"
+                conn.execute(text(f'ALTER TABLE {table.name} ADD COLUMN {col.name} {ddl}{default}'))
 
 
 @contextmanager
