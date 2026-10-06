@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>SiteBakkie · Construction health and safety from a voice note</title>
-<meta name="description" content="SiteBakkie turns a voice note into the daily task sheet, toolbox talk, inspection or incident report, signed on the phone. A green-or-red site board shows what is missing. For South African builders and site managers.">
+<meta name="description" content="AI-powered: SiteBakkie turns a voice note into the daily task sheet, toolbox talk, inspection or incident report, signed on the phone. A green-or-red site board shows what is missing. For South African builders and site managers.">
 <meta name="theme-color" content="#ffffff">
 <meta property="og:title" content="SiteBakkie · Site safety from the bakkie">
 <meta property="og:description" content="Say the day. The safety file keeps itself.">
@@ -27,6 +27,7 @@
     <a href="/" class="brand"><img src="logo.png" alt="SiteBakkie" height="34"></a>
     <nav class="links">
       <a href="#why">Why</a>
+      <a href="#voice">AI voice notes</a>
       <a href="#how">How it works</a>
       <a href="#board">Site board</a>
       <a href="#features">Features</a>
@@ -40,9 +41,9 @@
   <section class="hero">
     <div class="wrap herogrid">
       <div>
-        <span class="pill">For builders, civil contractors &amp; site managers in South Africa</span>
+        <span class="pill"><span class="ai-dot">✦</span> AI-powered site safety for South African builders</span>
         <h1>Say the day.<br><span class="accent">The safety file keeps itself.</span></h1>
-        <p class="lead">SiteBakkie turns a quick voice note into the <b>daily task sheet, toolbox talk, inspection or incident report</b>, signed by the workers on the phone. The site board shows every requirement in green or red, so you see what is missing before the inspector or the client does.</p>
+        <p class="lead">Talk for 30 seconds. SiteBakkie's AI turns your voice note into the <b>daily task sheet, toolbox talk, inspection, incident report or H&amp;S plan</b>, ready for the workers to sign on the phone. The site board shows every requirement in green or red, so you see what is missing before the inspector or the client does.</p>
         <div class="ctas">
           <a href="/app.html#signup" class="btn btn-accent btn-lg">Join the pilot</a>
           <a href="/app.html" class="btn btn-ghost btn-lg" id="login-hero">Log in</a>
@@ -86,6 +87,41 @@
     </div>
   </section>
 
+  <section id="voice" class="dark">
+    <div class="wrap">
+      <span class="pill dark-pill"><span class="ai-dot">✦</span> AI-powered · voice first</span>
+      <h2 style="margin-top:14px">Talk for 30 seconds.<br><span class="accent">Get the paperwork.</span></h2>
+      <p class="sub">Press record and say what is happening on site, the way you would tell your foreman. SiteBakkie's AI writes the form, adds the hazards, controls and PPE from your risk assessment, and gets it ready to sign.</p>
+      <div class="voice-demo">
+        <div class="vn">
+          <div class="vn-head"><span class="mic">🎙</span><b>Voice note</b><span class="vn-time">0:28</span></div>
+          <div class="wave" aria-hidden="true"><i style="--h:30"></i><i style="--h:55"></i><i style="--h:80"></i><i style="--h:45"></i><i style="--h:95"></i><i style="--h:60"></i><i style="--h:35"></i><i style="--h:70"></i><i style="--h:100"></i><i style="--h:50"></i><i style="--h:40"></i><i style="--h:85"></i><i style="--h:65"></i><i style="--h:30"></i><i style="--h:75"></i><i style="--h:90"></i><i style="--h:45"></i><i style="--h:60"></i><i style="--h:35"></i><i style="--h:80"></i><i style="--h:55"></i><i style="--h:25"></i><i style="--h:70"></i><i style="--h:50"></i></div>
+          <p class="vn-text">“Morning. Sipho's team does brickwork on the east wall from the scaffold. Johan digs the sewer trench with the TLB, about one point four metres deep…”</p>
+          <div class="vn-langs">English · Afrikaans · or a mix</div>
+        </div>
+        <div class="v-arrow" aria-hidden="true"><span>AI</span>→</div>
+        <div class="vdoc">
+          <div class="vdoc-head"><b>Daily task sheet</b><span class="tag">Ready to sign</span></div>
+          <div class="vdoc-row"><b>Brickwork from the scaffold</b><span>Fall from height · falling objects</span><span class="ppe">Hard hat · harness · boots</span></div>
+          <div class="vdoc-row"><b>Sewer trench, 1.4 m, TLB</b><span>Trench collapse · buried services · plant</span><span class="ppe">Shoring · barricade · inspect before shift</span></div>
+          <div class="vdoc-sign">✍️ 14 workers sign on the phone</div>
+        </div>
+      </div>
+      <div class="times">
+        <div class="time"><h3>Daily task sheet</h3><div class="t-was">30 min by hand</div><div class="t-now">under 1 min</div></div>
+        <div class="time"><h3>Toolbox talk</h3><div class="t-was">1 hour to prepare</div><div class="t-now">30 sec, read aloud in 7 languages</div></div>
+        <div class="time"><h3>Incident report &amp; Annexure 1</h3><div class="t-was">3 hours</div><div class="t-now">2 min</div></div>
+        <div class="time"><h3>Site H&amp;S plan</h3><div class="t-was">days, from a consultant</div><div class="t-now">1 min to draft</div></div>
+      </div>
+      <div class="ai-points">
+        <div>✓ The task sheet uses only the hazards in your approved risk assessment.</div>
+        <div>✓ Nothing goes into the file until a person checks and signs it.</div>
+        <div>✓ No signal? The voice note waits on the phone and goes when you're back in range.</div>
+      </div>
+      <p class="fine dark-fine">Times by hand are typical estimates. With SiteBakkie you still read and sign every record.</p>
+    </div>
+  </section>
+
   <section id="how" class="band">
     <div class="wrap">
       <h2>How it works</h2>
@@ -100,10 +136,18 @@
     </div>
   </section>
 
-  <section id="board">
+  <section id="board" class="dark board-dark">
     <div class="wrap">
       <h2>Green or red, at a glance</h2>
       <p class="sub">One page shows every part of the site's safety in a green, amber or red box. A site manager sees in five seconds what is missing today, and what runs out soon.</p>
+      <div class="board-strip" aria-hidden="true">
+        <div class="tile t-g"><b>Task sheet</b>Signed by 14</div>
+        <div class="tile t-g"><b>Toolbox talk</b>Done this week</div>
+        <div class="tile t-r"><b>Scaffold</b>Inspection overdue</div>
+        <div class="tile t-a"><b>First aider</b>Ends in 12 days</div>
+        <div class="tile t-g"><b>H&amp;S plan</b>Approved</div>
+        <div class="tile t-r"><b>TLB check</b>Not done today</div>
+      </div>
       <div class="flow">
         <div class="fstep"><div class="fnum">1</div><h3>Morning</h3><p>Task sheet briefed and signed before work starts.</p></div>
         <div class="farrow">→</div>
@@ -136,7 +180,7 @@
     </div>
   </section>
 
-  <section id="works-with">
+  <section id="works-with" class="warm-soft">
     <div class="wrap">
       <h2>Works with how sites already run</h2>
       <p class="sub">No new office. SiteBakkie fits the people and the paper your site already has.</p>
@@ -153,7 +197,7 @@
     </div>
   </section>
 
-  <section class="band trades">
+  <section class="trades">
     <div class="wrap">
       <h2>Who it's for</h2>
       <p class="sub">Any company that runs a construction site in South Africa, from a house extension to a civils contract.</p>
@@ -196,13 +240,13 @@
     </div>
   </section>
 
-  <section id="pilot">
+  <section id="pilot" class="warm">
     <div class="wrap pilot">
       <h2>Join the pilot</h2>
       <p class="sub">SiteBakkie is in a pilot with builders and their safety consultants in the Garden Route. Pilot companies help shape the app. Ask us for an invite code, then create your company in two minutes.</p>
       <div class="ctas">
-        <a href="mailto:info@sitebakkie.co.za?subject=SiteBakkie%20pilot" class="btn btn-accent btn-lg">Ask for an invite</a>
-        <a href="/app.html#signup" class="btn btn-ghost btn-lg">I have a code</a>
+        <a href="mailto:info@sitebakkie.co.za?subject=SiteBakkie%20pilot" class="btn btn-dark btn-lg">Ask for an invite</a>
+        <a href="/app.html#signup" class="btn btn-light btn-lg">I have a code</a>
       </div>
       <p class="legal">SiteBakkie helps you keep the records the Occupational Health and Safety Act and the Construction Regulations 2014 ask for. It does not replace your safety officer, your consultant or legal advice.</p>
     </div>
@@ -222,7 +266,7 @@
   </section>
 </main>
 
-<footer>
+<footer class="foot-dark">
   <div class="wrap footrow">
     <img src="logo.png" alt="SiteBakkie" height="26">
     <span>Site safety from the bakkie. © 2026 SiteBakkie · <a href="/terms.html">Terms</a> · <a href="/privacy.html">Privacy</a> · <a href="mailto:info@sitebakkie.co.za">info@sitebakkie.co.za</a> · From the makers of <a href="https://www.quotebakkie.co.za">QuoteBakkie</a></span>
