@@ -13,7 +13,8 @@ async function finishRecord(kind, payload, signatures, extra = {}) {
     lat: fix.lat, lng: fix.lng, payload, signatures, transcript: extra.transcript || "", audio: extra.audio || "" };
   await IDB.outbox.put({ id: body.client_id, body, created: Date.now(), tries: 0, error: "", label: extra.label || kind });
   S.pending = (await IDB.outbox.all()).length; renderHeader();
-  flush().then(async () => { if (online()) { await loadSite(true); refreshIfIdle(); } });
+  // With a signal, wait for the send so the next screen shows the new record.
+  if (online()) { await flush(); loadSite(true).then(refreshIfIdle); } else flush();
   toast(online() ? "Saved. Sending now." : "Saved on this device. It sends when the signal comes back.", "ok");
 }
 function hazardHtml(ids) {
@@ -180,7 +181,7 @@ ACT["task-finish"] = async (btn) => {
   const sigs = taskWorkers(d).map((w) => d.signatures[w.id]).concat([d.signatures["user:" + me().id]]);
   await finishRecord("task_sheet", { tasks: d.tasks, unmatched: d.unmatched, notes: d.notes, transcript_used: !!d.transcript }, sigs,
     { client_id: d.client_id, transcript: d.transcript, audio: d.audio, label: "Daily task sheet" });
-  await dropDraft("task"); go("today");
+  await dropDraft("task"); go("board");
 };
 
 // ================================================================ toolbox talk
@@ -300,7 +301,7 @@ ACT["talk-finish"] = async (btn) => {
   await finishRecord("toolbox_talk", { topic: d.topic, title: d.title, language: d.language, text: d.text, text_en: d.text_en,
     key_points: d.key_points, questions: d.questions, ai_translated: d.ai_translated, group_photo: d.group_photo }, sigs,
     { client_id: d.client_id, label: "Toolbox talk: " + d.title });
-  await dropDraft("talk"); go("today");
+  await dropDraft("talk"); go("board");
 };
 
 // ================================================================ checks and inspections
@@ -313,8 +314,7 @@ VIEWS.check = async (token) => {
     return go(`checklist/${p.template}/${p.id}`);
   }
   const plant = S.data.plant, insp = Object.entries(S.data.checklists).filter(([, c]) => c.kind === "inspection");
-  render(`<h1>Checks and inspections</h1>
-    <p class="muted small">Tip: scan the QR code on the machine with the phone camera.</p>
+  render(`${head("Plant pre-use checks", "Scan the QR sticker on the machine, or choose it here. Inspections are under + Record.", "board")}
     <h2>Plant</h2>${plant.length ? `<div class="card"><ul class="plain">${plant.map((p) => `<li class="list-item" data-act="nav" data-to="checklist/${p.template}/${p.id}">
       <div class="grow"><b>${esc(p.name)}</b> <span class="muted small">${esc(p.ident)}</span><div class="muted small">${esc(p.template_title)}</div></div><span>›</span></li>`).join("")}</ul></div>`
       : `<p class="muted">No plant yet. <a href="#plant">Add plant</a></p>`}
@@ -329,8 +329,7 @@ VIEWS.checklist = async (tpl, plantId = "") => {
   const key = `check:${tpl}:${plantId}`;
   const d = (await IDB.get(draftKey(key))) || { client_id: newId(), answers: c.items.map(() => ({ answer: "", note: "", photo: "" })), location: "", notes: "", signer: "", sig: null };
   const fails = c.items.some((q, i) => q.critical && d.answers[i].answer === "defect");
-  render(`<button class="link" data-act="nav" data-to="check">‹ Checks</button>
-    <h1>${esc(c.title)}</h1>${plant ? `<p><b>${esc(plant.name)}</b> <span class="muted">${esc(plant.ident)}</span></p>` : `<label>Location on site</label><input data-cf="location" value="${esc(d.location)}" placeholder="North scaffold, block B">`}
+  render(`${head(c.title, c.kind === "plant" ? "Answer every item before use." : "Inspect, answer every item, sign.", c.kind === "plant" ? "check" : "inspections")}${plant ? `<p><b>${esc(plant.name)}</b> <span class="muted">${esc(plant.ident)}</span></p>` : `<label>Location on site</label><input data-cf="location" value="${esc(d.location)}" placeholder="North scaffold, block B">`}
     ${c.note ? `<div class="note warn small">${esc(c.note)}</div>` : ""}
     ${c.items.map((q, i) => { const a = d.answers[i]; return `<div class="card"><div>${esc(q.q)} ${q.critical ? '<span class="crit">*</span>' : ""}</div>
       <div class="answer">${["ok", "defect", "na"].map((v) => `<button class="${v} ${a.answer === v ? "on" : ""}" data-act="ck-ans" data-i="${i}" data-v="${v}">${{ ok: "OK", defect: "Defect", na: "N/A" }[v]}</button>`).join("")}</div>
@@ -342,7 +341,7 @@ VIEWS.checklist = async (tpl, plantId = "") => {
     <label>Who did the check?</label>
     <select data-cf="signer"><option value="">Choose…</option><option value="user:${me().id}" ${d.signer === "user:" + me().id ? "selected" : ""}>${esc(me().name)} (me)</option>
       ${S.data.workers.map((w) => `<option value="${w.id}" ${d.signer === w.id ? "selected" : ""}>${esc(w.name)}</option>`).join("")}</select>
-    <button class="primary" data-act="ck-finish" data-tpl="${tpl}" data-plant="${plantId}">Sign and save</button>`);
+    ${actionBar(`<button class="primary" data-act="ck-finish" data-tpl="${tpl}" data-plant="${plantId}">Sign and save</button>`)}`);
   const save = () => saveDraft(key, d);
   $("#view").oninput = $("#view").onchange = (e) => {
     const f = e.target.dataset.cf; if (!f) return;
@@ -364,7 +363,7 @@ VIEWS.checklist = async (tpl, plantId = "") => {
       answers: d.answers.map((a) => ({ answer: a.answer, note: a.note, ...(a.photo ? { photo: a.photo } : {}) })) }, [signature],
       { client_id: d.client_id, label: plant ? plant.name : c.title });
     await dropDraft(key);
-    go(fails ? "today" : "check");
+    go(fails ? "board" : "check");
   };
 };
 
@@ -431,7 +430,7 @@ ACT["inc-finish"] = async (btn) => {
     witnesses: d.witnesses.split(",").map((x) => x.trim()).filter(Boolean), immediate_actions: d.immediate_actions, possible_causes: d.possible_causes,
     possibly_reportable: d.possibly_reportable, reportable_reason: d.reportable_reason, photos: d.photos },
     [{ ...sig, user_id: me().id, role: "reporter" }], { client_id: d.client_id, transcript: d.transcript, audio: d.audio, label: "Incident report" });
-  await dropDraft("incident"); go("today");
+  await dropDraft("incident"); go("board");
 };
 
 // ================================================================ induction
@@ -441,13 +440,16 @@ VIEWS.induct = async (wid) => {
   if (!w) return render(`<div class="note bad">Add the worker to this site first.</div>`);
   const site = S.data.site;
   let wsig = null;
-  render(`<button class="link" data-act="back">‹ Back</button><h1>Site induction</h1><p><b>${esc(w.name)}</b> · ${esc(site.name)}</p>
+  render(`${head("Site induction", `${esc(w.name)} · ${esc(site.name)}. Read the rules to the worker, then both sign.`, "history")}
     <div class="card talk-text" style="font-size:16px">${esc(S.data.induction_text)}</div>
     ${site.emergency ? `<div class="card"><b>Emergency</b><div style="white-space:pre-wrap">${esc(site.emergency)}</div></div>` : ""}
+    <h2>Worker's agreement</h2><div class="card"><div class="small" style="white-space:pre-wrap">${esc(S.data.worker_consent)}</div>
+      <label class="check"><input type="checkbox" id="ind-consent"> ${esc(w.name)} agrees</label></div>
     <div class="card"><div class="row between"><div><b>${esc(w.name)}</b><div class="muted small">I understand the site rules.</div></div><span id="ind-w"><button class="small primary" data-act="ind-sign-w">Sign</button></span></div></div>
     <div class="card"><div class="row between"><div><b>${esc(me().name)}</b><div class="muted small">Inductor</div></div><span id="ind-me"></span></div></div>
-    <button class="primary" data-act="ind-finish" disabled>Finish and save</button>`);
+    ${actionBar(`<button class="primary" data-act="ind-finish" disabled>Finish and save</button>`)}`);
   ACT["ind-sign-w"] = async () => {
+    if (!$("#ind-consent").checked) return toast("The worker must agree first (e-signatures and privacy).", "bad");
     wsig = await signatureModal({ name: w.name, subtitle: "I understand the site rules.", photoRequired: !w.photo_url });
     if (!wsig) return;
     $("#ind-w").innerHTML = '<span class="badge ok">Signed ✓</span>';
@@ -460,7 +462,7 @@ VIEWS.induct = async (wid) => {
     const b = $("[data-act=ind-finish]"); b.disabled = false;
     ACT["ind-finish"] = async () => {
       b.disabled = true;
-      await finishRecord("induction", { worker_id: w.id, language: w.language }, [{ ...wsig, worker_id: w.id, role: "worker" }, { ...s, user_id: me().id, role: "inductor" }],
+      await finishRecord("induction", { worker_id: w.id, language: w.language, consent: true }, [{ ...wsig, worker_id: w.id, role: "worker" }, { ...s, user_id: me().id, role: "inductor" }],
         { label: "Induction: " + w.name });
       w.inducted = true; go("workers");
     };

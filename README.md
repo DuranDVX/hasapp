@@ -13,6 +13,11 @@ signal comes back.
 
 ## What the app does
 
+The home screen is the **Site Board**: every legal duty for the site as a
+green, amber or red tile, with its regulation. Tap a tile to fix it.
+`app/compliance.py` decides each colour. Site setup switches duties on
+(excavations, scaffolding, plant, contractors…).
+
 | Screen | What happens |
 |---|---|
 | Today | Status for the day: task sheet, toolbox talk, plant checks, inductions, medicals, expiring certificates, missing file sections |
@@ -22,7 +27,14 @@ signal comes back.
 | Incident | Voice → AI fills the report and flags a possible section 24 (OHS Act) reportable incident for the safety officer |
 | Induction | Site rules + emergency info → worker signs with a photo → inductor signs |
 | Workers | Register with photo, ID number, trade, employer, language, and certificates with expiry dates |
-| Safety file | Index of 17 sections, uploads per section, one-tap PDF export, record integrity check |
+| Safety file | Index of 17 sections, uploads per section, one-tap PDF export, record integrity check, a copy kept on the device for no-signal inspections |
+| Visitors | Visitor induction with PPE issued, visitor and host sign (reg 7(6)) |
+| Contractors | Register with COID letter and expiry, written appointment, H&S plan approval, section 37(2) agreement (reg 7(1)(c), 7(1)(f)) |
+| Appointments | Legal appointments in writing, both sign, incl. operator authorisation (reg 8, 9, 10, 13, 16, 19, 23(1)(d)(i)) |
+| Documents for signing | PDFs issued for an advanced electronic signature (AES); the signed PDF comes back and the app checks it (ECT Act s13(1)) |
+| Audit | Monthly audit pre-filled from the board, findings, principal contractor's receipt (reg 5(1)(o)-(p)) |
+| Incidents | Investigation within 7 days, reporting dates, Annexure 1 PDF (OHS Act s24, GAR 8-9) |
+| Print centre | Registers and record packs for clients who want paper; every page has a QR code that checks it against the original (`/v/<id>`) |
 
 ## The safety rule
 
@@ -40,6 +52,21 @@ The AI never writes a hazard, a control or PPE into a record.
 The starter library (`app/library.py`) is a DRAFT. A competent person must
 review it, the checklists and the safety-file index before a customer relies
 on them.
+
+## Signatures
+
+- **Site records** use the in-app signature (finger signature, optional photo,
+  GPS, device time, server time, hash chain). The company accepts the
+  e-signature agreement once; workers agree at induction (ECT Act s13(3), (5)).
+- **Signatures a law requires** (reg 13(2)(b)(ii)(bb), 19(8)(c), statutory
+  forms) and appointments use an **advanced electronic signature**. SA has two
+  accredited providers: LAWtrust (also through SigniFlow) and the SA Post
+  Office. The app issues the PDF, the signer signs it with their AES, and
+  `app/aes.py` checks the returned PDF with pyHanko: signer, issuer, intact
+  after signing. A signature counts as *trusted* only when it chains to a root
+  in `AES_TRUST_ROOTS` (PEM bundle); an issuer name alone proves nothing.
+  Wet ink + scan is the fallback.
+- Next step: SigniFlow API integration so signing happens inside the app.
 
 ## Record integrity
 

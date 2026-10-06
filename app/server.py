@@ -794,6 +794,8 @@ def sync(site_id: str, ctx: Ctx = Depends(current)):
                 "audit_items": library.AUDIT_ITEMS, "aes_kinds": library.AES_DOCS,
                 "worker_consent": library.WORKER_CONSENT, "inspection_schedule": library.INSPECTION_SCHEDULE,
                 "esign_accepted": bool(ctx.company.esign_accepted_at),
+                "required_appointments": [k for k, f in library.REQUIRED_APPOINTMENTS
+                                          if f is None or (site.features or {}).get(f)],
                 "contractors": [contractor_d(c) for c in s.scalars(select(db.Contractor).where(
                     db.Contractor.site_id == site.id, db.Contractor.active))],
                 "induction_text": ctx.company.induction_text or library.DEFAULT_INDUCTION,

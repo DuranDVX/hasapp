@@ -13,13 +13,16 @@ const STATUS_TEXT = { valid: "Valid", expiring: "Expires soon", expired: "Expire
 
 VIEWS.workers = async () => {
   const ws = S.data.workers;
-  render(`<div class="row between"><h1>Workers on site</h1>${can.write() ? `<button class="small primary" data-act="nav" data-to="worker/new">+ Add</button>` : ""}</div>
+  render(`${head("People on site", "Workers, contractors and visitors.")}${peopleTabs("workers")}
     ${ws.length ? `<div class="card"><ul class="plain">${ws.map((w) => `<li class="list-item" data-act="nav" data-to="worker/${w.id}">
       ${w.photo_url && online() ? `<img class="avatar" src="${w.photo_url}" alt="">` : `<div class="avatar">${esc(w.name[0])}</div>`}
-      <div class="grow"><b>${esc(w.name)}</b><div class="muted small">${esc(w.trade || "")}${w.employer ? " · " + esc(w.employer) : ""}</div></div>
-      <div style="text-align:right">${w.inducted ? "" : '<span class="badge warn">Induct</span><br>'}<span class="badge ${STATUS_BADGE[w.medical]}">Medical: ${STATUS_TEXT[w.medical]}</span></div></li>`).join("")}</ul></div>`
+      <div class="grow"><b>${esc(w.name)}</b><div class="muted small">${esc(w.trade || "")}${w.employer ? " · " + esc(w.employer) : ""}</div>
+        <div class="row small" style="gap:10px;margin-top:3px"><span class="row" style="gap:4px"><span class="dot ${w.inducted ? "green" : "red"}"></span>Inducted</span>
+        <span class="row" style="gap:4px"><span class="dot ${w.medical === "valid" ? "green" : w.medical === "expiring" ? "amber" : "red"}"></span>Medical</span></div></div>
+      <span>›</span></li>`).join("")}</ul></div>`
       : `<div class="note warn">No workers on this site yet.</div>`}
-    ${can.write() && online() ? `<button data-act="nav" data-to="worker-pick">Add workers from other sites</button>` : ""}`);
+    ${can.write() && online() ? `<button data-act="nav" data-to="worker-pick">Add workers from other sites</button>` : ""}
+    ${can.write() ? actionBar(`<button class="primary" data-act="nav" data-to="worker/new">+ Add a worker</button>`) : ""}`);
 };
 
 VIEWS["worker-pick"] = async () => {
@@ -43,7 +46,7 @@ VIEWS.worker = async (id) => {
   if (id === "new") return workerForm({});
   const w = worker(id);
   if (!w) return render(`<div class="note bad">Worker not found on this site.</div>`);
-  render(`<button class="link" data-act="nav" data-to="workers">‹ Workers</button>
+  render(`<button class="link back" data-act="nav" data-to="workers">‹ Back</button>
     <div class="row" style="margin:8px 0">${w.photo_url && online() ? `<img class="avatar" style="width:72px;height:72px" src="${w.photo_url}">` : `<div class="avatar" style="width:72px;height:72px;font-size:28px">${esc(w.name[0])}</div>`}
       <div><h1 style="margin:0">${esc(w.name)}</h1><div class="muted">${esc(w.trade)}${w.employer ? " · " + esc(w.employer) : " · Own staff"}</div></div></div>
     ${w.inducted ? `<div class="note ok">Inducted on this site.</div>` : `<div class="note warn">Not inducted on this site. ${can.write() ? `<button class="small primary" data-act="nav" data-to="induct/${w.id}">Induct now</button>` : ""}</div>`}

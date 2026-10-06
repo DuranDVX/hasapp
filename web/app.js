@@ -24,6 +24,17 @@ function friendly(e) {
 }
 const online = () => navigator.onLine !== false;
 
+// One page format everywhere: title, one-line purpose, optional back link.
+function head(title, purpose = "", back = "") {
+  return `<div class="page-head">${back ? `<button class="link back" data-act="${back === "history" ? "back" : "nav"}" data-to="${esc(back)}">‹ Back</button>` : ""}
+    <h1>${esc(title)}</h1>${purpose ? `<p>${purpose}</p>` : ""}</div>`;
+}
+// The main action of a screen sits in the same place on every screen.
+function actionBar(html) { return `<div class="action-bar noprint"><div>${html}</div></div>`; }
+
+// Light theme by default: easier to read in sunlight.
+(function theme() { document.documentElement.dataset.theme = ls.get("ss-theme") || "light"; })();
+
 async function api(path, opts = {}) {
   const headers = { ...(opts.headers || {}) };
   if (S.token) headers["X-Token"] = S.token;
@@ -112,8 +123,8 @@ async function flush() {
 }
 // Re-draw list screens after a sync; never re-draw a form the user is filling in.
 function refreshIfIdle() {
-  const name = (location.hash.slice(1) || "today").split("/")[0];
-  if (["today", "records", "workers"].includes(name) && !$(".modal")) route();
+  const name = (location.hash.slice(1) || "board").split("/")[0];
+  if (["board", "today", "records", "people", "workers"].includes(name) && !$(".modal")) route();
 }
 window.addEventListener("online", () => { renderHeader(); flush().then(() => loadSite(true)).then(refreshIfIdle); });
 window.addEventListener("offline", renderHeader);
@@ -136,14 +147,18 @@ function renderHeader() {
 function render(html) { $("#view").innerHTML = html; window.scrollTo(0, 0); }
 function go(hash) { if (location.hash === "#" + hash) route(); else location.hash = hash; }
 
+const NAV_OF = { board: "board", today: "board", records: "records", record: "records", people: "people", workers: "people",
+  worker: "people", contractors: "people", contractor: "people", visitors: "people", file: "file", more: "more" };
+const FAB_ON = ["board", "today", "records", "people", "workers", "contractors", "visitors"];
 async function route() {
-  const [name, ...args] = (location.hash.slice(1) || "today").split("/");
-  document.querySelectorAll("nav.bottom a").forEach((a) => a.classList.toggle("on", a.dataset.nav === ({ worker: "workers", record: "records" }[name] || name)));
+  const [name, ...args] = (location.hash.slice(1) || "board").split("/");
+  document.querySelectorAll("nav.bottom a").forEach((a) => a.classList.toggle("on", a.dataset.nav === NAV_OF[name]));
+  $(".fab")?.classList.toggle("hidden", !S.me || !can.write() || !FAB_ON.includes(name));
   if (!S.token) return VIEWS[name === "signup" ? "signup" : "login"]();
   if (!S.me) return;
-  if (!S.siteId || !S.data) { if (!["sites", "site", "more", "profile", "company", "users"].includes(name)) return VIEWS.sites(); }
-  const view = VIEWS[name] || VIEWS.today;
-  try { await view(...args); } catch (e) { render(`<div class="note bad">${esc(friendly(e))}</div>`); }
+  if (!S.siteId || !S.data) { if (!["sites", "site", "more", "profile", "company", "users", "esign"].includes(name)) return VIEWS.sites(); }
+  const view = VIEWS[name === "today" ? "board" : name] || VIEWS.board;
+  try { await view(...args); } catch (e) { console.error(e); render(`<div class="note bad">${esc(friendly(e))}</div>`); }
 }
 window.addEventListener("hashchange", route);
 
@@ -208,7 +223,7 @@ ACT.logout = async () => {
 
 VIEWS.sites = () => {
   const sites = S.me.sites;
-  render(`<h1>Choose a site</h1>
+  render(`${head("Choose a site", "Pick the site you work on today.")}
     ${sites.length ? `<div class="stack">${sites.map((x) => `<div class="card tap" data-act="pick-site" data-id="${x.id}">
       <div class="ico">🏗️</div><div class="grow"><b>${esc(x.name)}</b><div class="muted small">${esc(x.address || "")}</div></div>
       ${x.status === "closed" ? '<span class="badge">Closed</span>' : ""}</div>`).join("")}</div>`
@@ -219,12 +234,12 @@ ACT["pick-site"] = async (el) => {
   S.siteId = el.dataset.id; ls.set("ss-site", S.siteId); S.data = null;
   await loadSite(true);
   if (!S.data) return toast("Open this site once with a signal so it works offline.", "bad");
-  go("today");
+  go("board"); autoOfflineFile();
 };
 ACT.nav = (el) => go(el.dataset.to);
 VIEWS.site = (id) => {
   const x = id === "new" ? {} : S.me.sites.find((s) => s.id === id) || {};
-  render(`<h1>${id === "new" ? "New site" : "Edit site"}</h1><div class="card">
+  render(`${head(id === "new" ? "New site" : "Edit site", "", "sites")}<div class="card">
     <label>Site name</label><input id="st-name" value="${esc(x.name || "")}" placeholder="Erf 1234, Plettenberg Bay">
     <label>Address</label><input id="st-addr" value="${esc(x.address || "")}">
     <label>Client</label><input id="st-client" value="${esc(x.client || "")}">
@@ -243,58 +258,13 @@ ACT["save-site"] = (btn) => busy(btn, "Saving…", async () => {
   const x = id === "new" ? await api("/api/sites", { json: body }) : await api("/api/sites/" + id, { method: "PUT", json: body });
   await loadMe();
   S.siteId = x.id; ls.set("ss-site", x.id); await loadSite(true);
-  toast("Site saved.", "ok"); go("today");
+  toast("Site saved.", "ok"); go(id === "new" ? "setup" : "board");
 });
 
 // ---------------------------------------------------------------- today
 
 const todayStr = () => localDate();
 async function pendingItems() { return (await IDB.outbox.all()).filter((i) => i.body.site_id === S.siteId); }
-
-VIEWS.today = async () => {
-  const pend = await pendingItems();
-  const d = S.data, t = todayStr();
-  let dash = null;
-  if (online()) { try { dash = await api("/api/dashboard?site_id=" + S.siteId); } catch {} }
-  const recent = d.recent || [];
-  const doneToday = (kind) => recent.some((r) => r.kind === kind && r.record_date === t) || pend.some((p) => p.body.kind === kind && p.body.record_date === t);
-  const taskDone = doneToday("task_sheet");
-  const talks = recent.filter((r) => r.kind === "toolbox_talk").map((r) => r.record_date).concat(pend.filter((p) => p.body.kind === "toolbox_talk").map((p) => p.body.record_date)).sort();
-  const lastTalk = talks[talks.length - 1] || "";
-  const talkDue = !lastTalk || (new Date(t) - new Date(lastTalk)) / 86400000 >= 7;
-  const checkedToday = {};
-  recent.filter((r) => r.kind === "check" && r.record_date === t).forEach((r) => { checkedToday[r.summary.split(" · ")[0]] = r.summary.split(" · ")[1]; });
-  pend.filter((p) => p.body.kind === "check" && p.body.record_date === t).forEach((p) => { checkedToday[p.label] = "waiting to send"; });
-  const sitePlant = d.plant.filter((p) => p.site_id === S.siteId);
-  if (dash) dash.plant.forEach((p) => { if (p.result) checkedToday[p.name] = { pass: "Pass", defects: "Defects", fail: "FAIL" }[p.result]; });
-  const notInducted = d.workers.filter((w) => !w.inducted && !pend.some((p) => p.body.kind === "induction" && p.body.payload.worker_id === w.id));
-  const noMed = d.workers.filter((w) => !["valid", "expiring"].includes(w.medical));
-  const draft = await IDB.get("draft:task:" + S.siteId);
-  const alerts = [];
-  if (dash) {
-    dash.reportable.length && alerts.push(`<div class="note bad">⚠️ ${dash.reportable.length} incident(s) may be reportable to the Department of Employment and Labour. The safety officer must decide.</div>`);
-    dash.expiring.slice(0, 5).forEach((x) => alerts.push(`<div class="note ${x.status === "expired" ? "bad" : "warn"}">${esc(x.who)}: ${esc(x.what)} ${x.status === "expired" ? "expired" : "expires"} ${esc(x.expires)}</div>`));
-    dash.unapproved_risks && can.manage() && alerts.push(`<div class="note warn">${dash.unapproved_risks} risk assessment item(s) are not approved yet. <a href="#risks">Review</a></div>`);
-    dash.missing_docs.length && can.manage() && alerts.push(`<div class="note warn">Safety file: ${dash.missing_docs.length} section(s) have no document. <a href="#file">Open the file</a></div>`);
-  }
-  const card = (act, ico, title, sub, badge, to = "") => `<div class="card tap" data-act="${act}" data-to="${to}"><div class="ico">${ico}</div>
-    <div class="grow"><b>${title}</b><div class="muted small">${sub}</div></div>${badge}</div>`;
-  render(`<div class="row between"><h1>Today</h1><span class="muted small">${new Date().toLocaleDateString("en-ZA", { weekday: "long", day: "numeric", month: "long" })}</span></div>
-    ${!online() ? `<div class="note warn">No signal. You can still fill in and sign everything. It sends when the signal comes back.</div>` : ""}
-    ${card("nav", "📋", "Daily task sheet", taskDone ? "Done for today" : draft ? "Draft in progress" : "Tell us today's work and get it signed", taskDone ? '<span class="badge ok">Done</span>' : '<span class="badge warn">To do</span>', "task")}
-    ${card("nav", "🗣️", "Toolbox talk", lastTalk ? "Last talk " + lastTalk : "No talk recorded yet", talkDue ? '<span class="badge warn">Due</span>' : '<span class="badge ok">OK</span>', "talk")}
-    <div class="card"><div class="row between"><b>🚜 Plant checks today</b><button class="small" data-act="nav" data-to="check">Check</button></div>
-      ${sitePlant.length ? `<ul class="plain">${sitePlant.map((p) => {
-        const st = checkedToday[p.name];
-        const badge = !st ? '<span class="badge warn">Not checked</span>' : /FAIL/.test(st) ? '<span class="badge bad">FAIL</span>' : /Defects/.test(st) ? '<span class="badge warn">Defects</span>' : /waiting/.test(st) ? '<span class="badge">Waiting</span>' : '<span class="badge ok">Pass</span>';
-        return `<li class="list-item" data-act="nav" data-to="check/${p.qr_token}"><div class="grow">${esc(p.name)} <span class="muted small">${esc(p.ident)}</span></div>${badge}</li>`;
-      }).join("")}</ul>` : `<p class="muted small">No plant on this site yet. ${can.write() ? '<a href="#plant">Add plant</a>' : ""}</p>`}</div>
-    ${card("nav", "👷", `${d.workers.length} workers on site`, [notInducted.length ? `${notInducted.length} not inducted` : "All inducted", noMed.length ? `${noMed.length} without a valid medical` : ""].filter(Boolean).join(" · "),
-      notInducted.length || noMed.length ? '<span class="badge warn">Check</span>' : '<span class="badge ok">OK</span>', "workers")}
-    ${alerts.join("")}
-    ${can.write() ? `<button class="danger" data-act="nav" data-to="incident">🚨 Report an incident or near miss</button>` : ""}
-    ${pend.length ? `<p class="muted small center">${pend.length} record(s) waiting to send. <a href="#records">See them</a></p>` : ""}`);
-};
 
 // ---------------------------------------------------------------- records
 
@@ -303,8 +273,9 @@ VIEWS.records = async (kind = "") => {
   let list = S.data.recent || [];
   if (online()) { try { list = await api(`/api/records?site_id=${S.siteId}&limit=150${kind ? "&kind=" + kind : ""}`); } catch {} }
   else if (kind) list = list.filter((r) => r.kind === kind);
-  const kinds = { "": "All", task_sheet: "Task sheets", toolbox_talk: "Talks", check: "Checks", incident: "Incidents", induction: "Inductions" };
-  render(`<h1>Records</h1>
+  const kinds = { "": "All", task_sheet: "Task sheets", toolbox_talk: "Talks", check: "Checks", visitor: "Visitors",
+    incident: "Incidents", investigation: "Investigations", induction: "Inductions", appointment: "Appointments", audit: "Audits" };
+  render(`${head("Records", "Every signed record for this site. Tap one to see it, print it or check it.")}
     <div class="chips">${Object.entries(kinds).map(([k, v]) => `<button class="chip ${k === kind ? "on" : ""}" data-act="nav" data-to="records/${k}">${v}</button>`).join("")}</div>
     ${pend.length ? `<h2>Waiting to send</h2><div class="card"><ul class="plain">${pend.map((p) => `<li><div class="row between"><div class="grow"><b>${esc(p.label || p.body.kind)}</b>
       <div class="muted small">${esc(p.body.record_date)}${p.error ? ` · <span class="crit">${esc(p.error)}</span>` : ""}</div></div>
@@ -350,32 +321,85 @@ VIEWS.record = async (id) => {
       ${p.immediate_actions ? `<div class="small"><b>Actions:</b> ${esc(p.immediate_actions)}</div>` : ""}
       <div class="chips">${(p.photos || []).map((x) => x.url ? `<img class="thumb" src="${x.url}">` : "").join("")}</div></div>`;
   } else if (r.kind === "induction") {
-    body = `<div class="card"><b>${esc(p.worker_name)}</b><div class="small" style="white-space:pre-wrap">${esc(p.induction_text)}</div></div>`;
+    body = `<div class="card"><b>${esc(p.worker_name)}</b><div class="small" style="white-space:pre-wrap">${esc(p.induction_text)}</div>
+      ${p.consent ? `<div class="note ok small">Worker agreed to e-signatures and the privacy notice.</div>` : ""}</div>`;
+  } else if (r.kind === "visitor") {
+    body = `<div class="card"><table class="simple">${[["Visitor", p.name], ["Company", p.company], ["Purpose", p.purpose], ["Host", p.host],
+      ["Time in", (p.time_in || "").replace("T", " ").slice(0, 16)], ["PPE issued", (p.ppe || []).join(", ")]].map(([a, b]) => `<tr><td class="muted">${a}</td><td>${esc(b || "-")}</td></tr>`).join("")}</table></div>`;
+  } else if (r.kind === "appointment") {
+    body = `<div class="card"><b>${esc(p.title)}</b> <span class="muted small">reg ${esc(p.reg)}</span>
+      <p><b>Appointee:</b> ${esc(p.appointee.name)}</p><p class="small">${esc(p.duties)}</p>${p.scope ? `<p class="small"><b>Scope:</b> ${esc(p.scope)}</p>` : ""}
+      ${p.aes_required ? `<div class="note info small">Also issued for an advanced e-signature. <a href="#aes">Documents for signing</a></div>` : ""}</div>`;
+  } else if (r.kind === "audit") {
+    body = `<div class="card"><b>Score ${p.score}%</b><ul class="plain">${p.items.map((it) => `<li class="row"><span class="dot ${it.result === "ok" ? "green" : it.result === "gap" ? "red" : "na"}"></span>
+      <div class="grow">${esc(it.title)}${it.note ? `<div class="muted small">${esc(it.note)}</div>` : ""}</div></li>`).join("")}</ul></div>
+      ${p.findings.length ? `<div class="card"><b>Findings</b>${p.findings.map((f) => `<div class="small" style="margin-top:6px">• ${esc(f.finding)}: ${esc(f.action)} (${esc(f.owner)}, ${esc(f.due)})</div>`).join("")}</div>` : ""}`;
+  } else if (r.kind === "investigation") {
+    body = `<div class="card"><b>Incident of ${esc(p.incident_date)}</b><p>${esc(p.findings)}</p>
+      ${p.actions.map((a) => `<div class="small">• ${esc(a.action)} (${esc(a.owner)}, ${esc(a.due)})</div>`).join("")}
+      <p class="small">${p.reportable ? `Reported to DEL ${esc(p.reported_dol.date)} (ref ${esc(p.reported_dol.ref)})` : "Not reportable: " + esc(p.not_reportable_reason)}</p></div>`;
+  } else if (r.kind === "audit_ack") {
+    body = `<div class="card">Report of the audit of ${esc(p.audit_date)} received.</div>`;
   }
-  render(`<button class="link" data-act="back">‹ Back</button><h1>${esc(r.kind_label)}</h1>
-    <p class="muted small">${esc(r.record_date)} · by ${esc(r.created_name)} · record #${r.seq}</p>${body}
+  render(`${head(r.kind_label, `${esc(r.record_date)} · by ${esc(r.created_name)} · record #${r.seq}`, "history")}${body}
     <h2>Signatures</h2><div class="card"><ul class="plain">${r.signatures.map((g) => `<li class="row">
       ${g.photo_url ? `<img class="avatar" src="${g.photo_url}">` : `<div class="avatar">${esc(g.name[0])}</div>`}
       <div class="grow"><b>${esc(g.name)}</b><div class="muted small">${esc(g.role)} · ${esc(g.signed_at.replace("T", " ").slice(0, 16))}</div></div>
       <img class="sigimg" src="${g.image_url}"></li>`).join("")}</ul></div>
     <p class="muted small">Hash ${esc(r.hash.slice(0, 20))}… · received ${esc(r.received_at.replace("T", " ").slice(0, 16))} UTC${r.lat ? ` · GPS ${r.lat.toFixed(4)}, ${r.lng.toFixed(4)}` : ""}</p>
-    <button class="dark" data-act="pdf" data-path="/api/records/${r.id}/pdf">Open PDF</button>`);
+    ${actionBar(`<div class="grid2"><button class="dark" data-act="pdf" data-path="/api/records/${r.id}/pdf">Open PDF</button>
+      <button data-act="pdf" data-path="/api/records/${r.id}/pdf?print=1">🖨️ Print copy</button></div>
+      ${r.kind === "incident" ? `<div class="grid2"><button data-act="pdf" data-path="/api/records/${r.id}/annexure1.pdf">Annexure 1</button>
+        <button class="primary" data-act="nav" data-to="investigate/${r.id}">Investigate</button></div>` : ""}`)}`);
 };
 ACT.back = () => history.back();
 ACT.pdf = (el) => openPdf(el.dataset.path);
 
 // ---------------------------------------------------------------- safety file
 
+// The site tablet keeps a full copy of the safety file, so an inspector
+// can see it when there is no signal (reg 7(1)(b): "keep on site").
+async function offlineFile() { try { return await IDB.get("offline-file:" + S.siteId); } catch { return null; } }
+async function saveOfflineFile(quiet = false) {
+  if (!online()) { if (!quiet) toast("No signal. The last saved copy stays on this device.", "bad"); return; }
+  try {
+    const res = await api(`/api/sites/${S.siteId}/file.pdf`, { raw: true, timeout: 300000 });
+    const blob = await res.blob();
+    await IDB.set("offline-file:" + S.siteId, { blob, at: Date.now(), bytes: blob.size });
+    if (!quiet) toast("Safety file saved on this device.", "ok");
+  } catch (e) { if (!quiet) toast(friendly(e), "bad"); }
+}
+async function autoOfflineFile() {
+  const f = await offlineFile();
+  if (online() && (!f || Date.now() - f.at > 12 * 3600 * 1000)) saveOfflineFile(true);
+}
+ACT["offline-save"] = (btn) => busy(btn, "Saving…", async () => { await saveOfflineFile(); route(); });
+ACT["offline-open"] = async () => {
+  const f = await offlineFile();
+  if (!f) return toast("No copy on this device yet.", "bad");
+  const url = URL.createObjectURL(f.blob), a = document.createElement("a");
+  a.href = url; a.target = "_blank"; document.body.appendChild(a); a.click(); a.remove();
+};
+
 VIEWS.file = async () => {
-  if (!online()) return render(`<h1>Safety file</h1><div class="note warn">The safety file needs a signal. Your records are safe on this device.</div>`);
+  const f = await offlineFile();
+  const age = f ? Math.round((Date.now() - f.at) / 3600000) : null;
+  const offlineCard = `<div class="card"><div class="row between"><b>📴 Copy on this device</b>
+      <span class="badge ${!f ? "red" : age > 24 ? "amber" : "green"}">${!f ? "None" : age < 1 ? "Up to date" : age + " h old"}</span></div>
+      <p class="muted small">For an inspector when there is no signal. It updates by itself twice a day.</p>
+      <div class="grid2"><button data-act="offline-open" ${f ? "" : "disabled"}>Open copy</button><button data-act="offline-save">Update now</button></div></div>`;
+  if (!online()) return render(`${head("Safety file", "The site's health and safety file.")}${offlineCard}
+    <div class="note warn">No signal. Open the copy on this device. Uploads and exports need a signal.</div>`);
   const docs = await api("/api/docs?site_id=" + S.siteId);
   const secs = S.data.file_sections;
   const t = todayStr(), start = S.data.site.start_date || "";
-  render(`<h1>Safety file</h1>
-    <div class="card"><b>Export the file</b><p class="muted small">One PDF with every section, document and signed record. Hand it to the client's agent or print it.</p>
+  render(`${head("Safety file", "Everything the law wants in the file. Upload the documents; the app adds the signed records.")}
+    ${offlineCard}
+    <div class="card"><b>Export the whole file</b><p class="muted small">One PDF: index, documents and every signed record.</p>
       <div class="grid2"><div><label>From</label><input type="date" id="f-from" value="${esc(start)}"></div><div><label>To</label><input type="date" id="f-to" value="${t}"></div></div>
-      <button class="primary" data-act="export-file">Download safety file PDF</button>
-      <button class="link" data-act="verify">Check record integrity</button><div id="verify-out"></div></div>
+      <button class="dark" data-act="export-file">Download safety file PDF</button>
+      <div class="grid2" style="margin-top:8px"><button data-act="nav" data-to="print">🖨️ Print centre</button><button data-act="verify">Check integrity</button></div>
+      <div id="verify-out"></div></div>
     <h2>Sections</h2>
     ${secs.map((s, i) => {
       const mine = docs.filter((d) => d.section === s.key);
@@ -415,23 +439,45 @@ ACT["del-doc"] = async (el) => {
 
 VIEWS.more = () => {
   const u = S.me.user;
-  const item = (to, ico, label, show = true) => show ? `<div class="card tap" data-act="nav" data-to="${to}"><div class="ico">${ico}</div><div class="grow"><b>${label}</b></div><span>›</span></div>` : "";
-  render(`<h1>More</h1>
-    <p class="muted">${esc(u.name)} · ${esc(u.role_label)} · ${esc(S.me.company.name)}</p>
-    ${item("sites", "🏗️", "Sites")}
+  const item = (to, ico, label, sub = "", show = true) => show ? `<div class="card tap" data-act="nav" data-to="${to}"><div class="ico">${ico}</div>
+    <div class="grow"><b>${label}</b>${sub ? `<div class="muted small">${sub}</div>` : ""}</div><span>›</span></div>` : "";
+  const dark = (ls.get("ss-theme") || "light") === "dark";
+  render(`${head("More", `${esc(u.name)} · ${esc(u.role_label)} · ${esc(S.me.company.name)}`)}
+    <h2>This site</h2>
+    ${item("setup", "⚙️", "Site setup", "What the site has: excavations, scaffolds, plant…", can.manage())}
+    ${item("appointments", "📜", "Legal appointments", "Construction manager, supervisors, operators…")}
+    ${item("aes", "✍️", "Documents for signing", "Advanced e-signature or wet ink")}
+    ${item("audit", "📋", "Monthly audit")}
+    ${item("incidents", "🚑", "Incidents and investigations")}
+    ${item("print", "🖨️", "Print centre", "Registers and records on paper")}
+    ${item("sites", "🏗️", "Switch site")}
+    <h2>Company</h2>
     ${item("risks", "⚠️", "Risk assessment library")}
     ${item("plant", "🚜", "Plant and QR codes")}
-    ${item("users", "👥", "Logins and roles", can.owner())}
-    ${item("company", "🏢", "Company details and site rules", can.manage())}
+    ${item("esign", "🖊️", "E-signature agreement")}
+    ${item("users", "👥", "Logins and roles", "", can.owner())}
+    ${item("company", "🏢", "Company details and site rules", "", can.manage())}
     ${item("profile", "👤", "My profile and password")}
+    <div class="card"><label class="check"><input type="checkbox" data-act-change="theme" ${dark ? "checked" : ""}> Dark screen (for indoors)</label></div>
     <button data-act="logout">Log out</button>
-    <p class="muted small center">${esc(S.me.app_name)} · pilot build</p>`);
+    <p class="muted small center"><a href="/privacy.html" target="_blank">Privacy</a> · <a href="/terms.html" target="_blank">Terms</a> · ${esc(S.me.app_name)} pilot</p>`);
+  $("#view").onchange = (e) => {
+    if (e.target.dataset.actChange === "theme") { const t = e.target.checked ? "dark" : "light"; ls.set("ss-theme", t); document.documentElement.dataset.theme = t; }
+  };
 };
 
 // ---------------------------------------------------------------- boot
 
 async function boot() {
-  if ("serviceWorker" in navigator) navigator.serviceWorker.register("/sw.js").catch(() => {});
+  if ("serviceWorker" in navigator) {
+    // A new version of the app takes over: reload once so every screen uses it. Drafts are safe in IndexedDB.
+    const hadController = !!navigator.serviceWorker.controller;
+    let reloaded = false;
+    navigator.serviceWorker.addEventListener("controllerchange", () => {
+      if (hadController && !reloaded && !$(".modal")) { reloaded = true; location.reload(); }
+    });
+    navigator.serviceWorker.register("/sw.js").then((r) => r.update()).catch(() => {});
+  }
   renderHeader();
   if (!S.token) return route();
   try {
@@ -441,6 +487,7 @@ async function boot() {
     renderHeader();
     route();
     flush();
+    if (S.siteId) autoOfflineFile();
   } catch (e) {
     if (e.status === 401) return logout(true);
     render(`<div class="note bad">${esc(friendly(e))}</div>`);

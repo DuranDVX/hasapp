@@ -1,9 +1,9 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#10202e">
+<meta name="theme-color" content="#0f2233">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <title>SiteSafe</title>
@@ -19,10 +19,11 @@
   <span class="sync" id="sync">…</span>
 </header>
 <main id="view"><div class="spinner"></div></main>
+<button class="fab hidden" data-act="record">＋ Record</button>
 <nav class="bottom hidden">
-  <a href="#today" data-nav="today"><span>🏠</span>Today</a>
+  <a href="#board" data-nav="board"><span>🚦</span>Board</a>
   <a href="#records" data-nav="records"><span>🗂️</span>Records</a>
-  <a href="#workers" data-nav="workers"><span>👷</span>Workers</a>
+  <a href="#people" data-nav="people"><span>👷</span>People</a>
   <a href="#file" data-nav="file"><span>📁</span>File</a>
   <a href="#more" data-nav="more"><span>☰</span>More</a>
 </nav>
@@ -31,5 +32,7 @@
 <script src="/app.js"></script>
 <script src="/forms.js"></script>
 <script src="/manage.js"></script>
+<script src="/board.js"></script>
+<script src="/registers.js"></script>
 </body>
 </html>

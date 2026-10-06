@@ -64,11 +64,13 @@ def board(s, company: db.Company, site: db.Site, today: date, now_hour: int = 12
     age = (today - last_talk).days if last_talk else None
     tiles.append(_tile("Today", "toolbox_talk", "Toolbox talk", "9(3)",
                        "green" if age is not None and age < 6 else "amber" if age is not None and age < 8 else "red",
-                       f"Last talk {age} day(s) ago." if age is not None else "No talk recorded yet.", "talk"))
+                       ("Talk done today." if age == 0 else f"Last talk {age} day(s) ago.") if age is not None
+                       else "No talk recorded yet.", "talk"))
 
     visitors_today = [r for r in by_kind.get("visitor", []) if r.record_date == today]
     tiles.append(_tile("Today", "visitors", "Visitor register", "7(6)", "green",
-                       f"{len(visitors_today)} visitor(s) inducted today.", "visitor", len(visitors_today)))
+                       f"{len(visitors_today)} visitor(s) inducted today." if visitors_today else
+                       "No visitors today. Induct every visitor before entry.", "visitors", len(visitors_today)))
 
     # ------------------------------------------------------------ People
     workers = s.scalars(select(db.Worker).join(db.SiteWorker, db.SiteWorker.worker_id == db.Worker.id)
