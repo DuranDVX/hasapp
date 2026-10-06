@@ -212,3 +212,15 @@ body {
   .brand img { height: 27px; }
   .nav .btn { padding: 8px 14px; }
 }
+
+/* pricing */
+.draft-pill { background: #fff1dc; color: #8f4a00; border: 1px dashed #e0a24f; }
+.tiers { width: 100%; border-collapse: collapse; margin: 0 0 14px; font-size: 15px; }
+.tiers td { padding: 7px 0; border-bottom: 1px solid var(--line); }
+.tiers td:last-child { text-align: right; font-weight: 700; }
+.price .pill { align-self: flex-start; }
+.example { display: flex; gap: 16px; flex-wrap: wrap; justify-content: space-between; align-items: center; margin-top: 22px;
+  padding: 18px 22px; border-radius: 18px; background: rgba(255,255,255,.62); border: 1px solid rgba(255,255,255,.8);
+  box-shadow: 0 10px 30px rgba(18,36,51,.07); }
+.example-vs { color: var(--muted); }
+.example-vs b { color: #a3221a; text-decoration: line-through; }
