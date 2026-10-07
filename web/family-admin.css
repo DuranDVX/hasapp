@@ -112,3 +112,29 @@ ul.hist > li .mini { margin: 8px 6px 0 0; }
   table.users tr:first-child { display: none; }
   table.users tr { border-bottom: 1px solid var(--line); padding: 6px 0; } table.users td { border: 0; padding: 3px 0; }
 }
+
+/* ================= the shared admin home ================= */
+.fa-title { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+.fa-title p { margin: 0; }
+.fa-tiles { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-bottom: 4px; }
+.fa-tile { background: var(--card); border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; display: grid; gap: 1px; }
+.fa-tile b { font-size: 28px; font-weight: 800; letter-spacing: -.5px; line-height: 1.1; }
+.fa-tile span { font-size: 13px; font-weight: 600; color: var(--muted); }
+.fa-tile small { font-size: 12px; color: var(--muted); }
+.fa-tile.ok b { color: var(--ok); } .fa-tile.warn b { color: var(--warn); } .fa-tile.bad b { color: var(--bad); }
+.fa-tile.accent { border-color: var(--accent); background: var(--accent-bg); }
+.fa-needs { display: grid; gap: 8px; }
+.fa-need { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; }
+.fa-need.warn { background: var(--warn-bg); color: var(--warn); } .fa-need.bad { background: var(--bad-bg); color: var(--bad); }
+.fa-need.ok { background: var(--ok-bg); color: var(--ok); }
+.fa-need button { margin-left: auto; }
+.fa-tools { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+.fa-tools input { flex: 1; min-width: 200px; margin: 0; }
+.fa-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.fa-chips button { border-radius: 99px; padding: 7px 12px; font-size: 13px; }
+.fa-chips button.on { background: var(--navy); border-color: var(--navy); color: #fff; }
+.fa-chips button.on .muted { color: #b9c6d2; }
+.fa-cust .fa-name { font-size: 17px; }
+.fa-cust details { margin-top: 10px; }
+@media (max-width: 960px) { .fa-tiles { grid-template-columns: repeat(3, 1fr); } }
+@media (max-width: 520px) { .fa-tiles { grid-template-columns: repeat(2, 1fr); } }

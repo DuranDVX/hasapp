@@ -19,7 +19,7 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from . import aes, ai, auth, compliance, config, consultant, db, files, library, mailer, pdf, records, stt, tts
+from . import aes, ai, analytics, auth, compliance, config, consultant, db, files, library, mailer, pdf, records, stt, tts
 from .auth import Ctx, current
 
 logging.basicConfig(level=logging.INFO)
@@ -75,6 +75,13 @@ async def _headers(request: Request, call_next):
         q = f"?{request.url.query}" if request.url.query else ""
         return RedirectResponse(f"https://{CANONICAL}{request.url.path}{q}", status_code=301)
     resp = await call_next(request)
+    if request.method == "GET" and resp.status_code == 200 and request.url.path in analytics.PAGES:
+        try:   # anonymous visitor counts, the same as QuoteBakkie (no cookies, no IP stored)
+            analytics.record(request.url.path, request.url.query, _client_ip(request),
+                             request.headers.get("user-agent", ""), request.headers.get("referer", ""),
+                             request.headers.get("host", ""))
+        except Exception:
+            log.exception("analytics failed")
     for k, v in SECURITY_HEADERS.items():
         resp.headers.setdefault(k, v)
     path = request.url.path
@@ -121,6 +128,11 @@ def _date(v, field="date") -> date | None:
         return date.fromisoformat(str(v)[:10])
     except ValueError:
         raise HTTPException(400, f"Bad {field}.")
+
+
+def _client_ip(request: Request) -> str:
+    # Railway's edge sets X-Real-IP to the real client address.
+    return request.headers.get("x-real-ip") or (request.client.host if request.client else "?")
 
 
 def _s(v, n=200) -> str:
@@ -292,7 +304,7 @@ def _new_company(s, name: str, owner: str, email: str, password: str, invite: st
 
 
 @app.post("/api/signup")
-def signup(body: dict = Body(...)):
+def signup(request: Request, body: dict = Body(...)):
     invite = _s(body.get("invite")).lower()
     with db.session() as s:
         all_codes = s.scalars(select(db.InviteCode)).all()
@@ -313,7 +325,12 @@ def signup(body: dict = Body(...)):
         c, u = _new_company(s, _s(body["company"]), _s(body["name"]), email, body["password"], invite)
         if invite:
             log.info("sign-up %s with invite %s", c.name, invite)
-        return {"token": auth.new_session(s, u)}
+        token = auth.new_session(s, u)
+    try:
+        analytics.record("/app.html", "", _client_ip(request), request.headers.get("user-agent", ""), "", "", event="signup")
+    except Exception:
+        log.exception("analytics failed")
+    return {"token": token}
 
 
 @app.post("/api/login")
@@ -1991,6 +2008,7 @@ def text_to_speech(body: dict = Body(...), ctx: Ctx = Depends(current)):
 def cron_expiry(x_cron_token: str = Header(None)):
     if not config.CRON_TOKEN or x_cron_token != config.CRON_TOKEN:
         raise HTTPException(403, "Forbidden")
+    analytics.purge()   # visitor counts older than 400 days
     sent = 0
     with db.session() as s:
         for c in s.scalars(select(db.Company)):
@@ -2176,7 +2194,7 @@ def _admin_user(u: db.User) -> dict:
 @app.get("/api/admin/overview", dependencies=[Depends(admin)])
 def admin_overview():
     from sqlalchemy import func as F
-    week = db.utcnow() - timedelta(days=7)
+    week, month = db.utcnow() - timedelta(days=7), db.utcnow() - timedelta(days=30)
     with db.session() as s:
         count = lambda m, *w: s.scalar(select(F.count()).select_from(m).where(*w)) or 0
         companies = []
@@ -2190,6 +2208,7 @@ def admin_overview():
                 "workers": count(db.Worker, db.Worker.company_id == c.id),
                 "records": count(db.Record, db.Record.company_id == c.id),
                 "records_7d": count(db.Record, db.Record.company_id == c.id, db.Record.received_at >= week),
+                "records_30d": count(db.Record, db.Record.company_id == c.id, db.Record.received_at >= month),
                 "last_activity": last.isoformat(timespec="minutes") if last else "",
                 "users": [_admin_user(u) for u in users]})
         invites = [{"code": i.code, "label": i.label, "active": i.active, "uses": i.uses,
@@ -2206,6 +2225,11 @@ def admin_overview():
                            "records_7d": count(db.Record, db.Record.received_at >= week)},
                 "companies": companies, "invites": invites, "env_invites": env_codes, "roles": auth.ROLES,
                 "resets": resets}
+
+
+@app.get("/api/admin/stats", dependencies=[Depends(admin)])
+def admin_stats(days: int = 30):
+    return analytics.stats(max(1, min(days, 365)))
 
 
 @app.post("/api/admin/invites", dependencies=[Depends(admin)])

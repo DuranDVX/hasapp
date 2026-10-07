@@ -7,6 +7,7 @@
 <title>SiteBakkie admin</title>
 <link rel="icon" href="/favicon.png">
 <link rel="stylesheet" href="/family-admin.css">
+<script src="/family-admin.js"></script>
 </head>
 <body>
 <header class="fa-head"><img class="logo" src="/logo-head.png" alt="SiteBakkie"><span class="fa-tag">Admin</span>
@@ -88,6 +89,11 @@ $("#out").onclick = () => {
   store("sb-admin", null); store("bakkie-admin", null); code = tok = null; login();
 };
 let D = null;
+let STATS_DAYS = 30;
+async function loadVisitors(el) {
+  try { FA.visitors(el, await api("/api/admin/stats?days=" + STATS_DAYS), { site: "www.sitebakkie.co.za", onDays: (d) => { STATS_DAYS = d; loadVisitors(el); } }); }
+  catch (e) { el.innerHTML = `<p class="crit small">${esc(e.message)}</p>`; }
+}
 async function load() {
   try { D = await api("/api/admin/overview"); } catch (e) {
     if (e.status === 401) { tok = code = null; store("sb-admin", null); store("bakkie-admin", null); }
@@ -95,41 +101,60 @@ async function load() {
   }
   chrome(true);
   if (tok) api("/api/family/me").then((m) => { $("#who").textContent = m.email; }).catch(() => {});
-  const t = D.totals;
-  $("#view").innerHTML = `<div class="page-head"><h1>SiteBakkie</h1><p>Every company and login on SiteBakkie. Temporary passwords show once; give them to the person.</p></div>
-    <div class="stats">${[["Companies", t.companies], ["Logins", t.users], ["Sites", t.sites], ["Workers", t.workers], ["Records", t.records], ["Records, 7 days", t.records_7d]]
-      .map(([l, v]) => `<div class="card"><b>${v}</b><span class="muted small">${l}</span></div>`).join("")}</div>
-    ${D.resets.filter((r) => !r.used && !r.emailed).length ? `<h2>Password help</h2><div class="card"><p class="small muted">These people asked for a new password and email is not set up. Make a new password and send it to them.</p>
-      <table class="users">${D.resets.filter((r) => !r.used && !r.emailed).map((r) => `<tr><td>${esc(r.name)}</td><td>${esc(r.email)}</td><td>${fmt(r.at)}</td>
-        <td><button class="small" data-reset="${r.user_id}">New password</button><div data-out="${r.user_id}"></div></td></tr>`).join("")}</table></div>` : ""}
-    <h2>Invite codes</h2>
-    <div class="card"><table class="users"><tr><th>Code</th><th>For</th><th>Sign-ups</th><th>Status</th><th></th></tr>
-      ${D.invites.map((i) => `<tr class="${i.active ? "" : "off"}"><td><b>${esc(i.code)}</b></td><td>${esc(i.label)}</td><td>${i.uses}</td>
-        <td><span class="badge ${i.active ? "ok" : ""}">${i.active ? "Active" : "Off"}</span></td>
-        <td><button class="small" data-inv="${esc(i.code)}" data-on="${i.active ? 0 : 1}">${i.active ? "Switch off" : "Switch on"}</button></td></tr>`).join("")}
-      ${D.env_invites.map((c) => `<tr><td><b>${esc(c)}</b></td><td class="muted">set in Railway (HAS_SIGNUP_CODE)</td><td></td><td><span class="badge ok">Active</span></td><td></td></tr>`).join("")}</table>
-      <div class="row" style="margin-top:10px"><input id="inv-label" placeholder="Who is it for? (e.g. Pieter, Plett Builders)" style="margin:0"><button class="small primary" id="inv-add">New code</button></div>
-      <div id="inv-out"></div></div>
-    <h2>Companies (${D.companies.length})</h2>
-    <details class="card"><summary><b>+ New company</b> <span class="muted small">(make the account for them; they get a temporary password)</span></summary>
-      <div class="grid2" style="margin-top:8px"><input id="nc-name" placeholder="Company name (e.g. JB Civils)"><input id="nc-owner" placeholder="Owner's name"></div>
-      <input id="nc-email" type="email" placeholder="Owner's email" autocapitalize="off" autocorrect="off">
-      <button class="small primary" id="nc-add">Make company</button><div id="nc-out"></div></details>
-    ${D.companies.map((c) => `<div class="card ${c.active ? "" : "off"}">
-      <div class="row between wrap"><div><b style="font-size:18px">${esc(c.name)}</b> ${c.active ? "" : '<span class="badge bad">Switched off</span>'}
-        <div class="muted small">Signed up ${fmt(c.created_at)} · invite ${esc(c.invite || "-")} · ${c.sites} site(s) · ${c.workers} worker(s) · ${c.records} record(s), ${c.records_7d} this week · last activity ${fmt(c.last_activity)}</div></div>
-        <button class="small" data-co="${c.id}" data-on="${c.active ? 0 : 1}">${c.active ? "Switch company off" : "Switch company on"}</button></div>
-      <table class="users" style="margin-top:8px"><tr><th>Name</th><th>Email</th><th>Role</th><th>Last login</th><th></th></tr>
-        ${c.users.map((u) => `<tr class="${u.active ? "" : "off"}"><td>${esc(u.name)}</td><td>${esc(u.email)}</td>
-          <td><select data-role="${u.id}" style="margin:0;padding:6px">${Object.entries(D.roles).map(([k, v]) => `<option value="${k}" ${k === u.role ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></td>
-          <td>${fmt(u.last_login_at)}</td>
+  const cs = D.companies, P = FA.frame($("#view"), { title: "SiteBakkie", addLabel: "Add customer",
+    sub: "Every builder on SiteBakkie: logins, sign-ups and payments. Temporary passwords show once; give them to the person." });
+  // 1. add a customer
+  P.add.innerHTML = `<b>Add a customer</b> <span class="muted small">They get a login and a temporary password to send them.</span>
+    <div class="grid2" style="margin-top:8px"><input id="nc-name" placeholder="Company name (e.g. JB Civils)"><input id="nc-owner" placeholder="Owner's name"></div>
+    <input id="nc-email" type="email" placeholder="Owner's email" autocapitalize="off" autocorrect="off">
+    <button class="primary" id="nc-add">Make the account</button>`;
+  // 2. six numbers (billing is not live yet: every company is on the pilot)
+  const active = cs.filter((c) => c.active);
+  FA.tiles(P.tiles, [
+    { label: "Customers", value: cs.length, hint: `${D.totals.sites} sites` },
+    { label: "Paying", value: 0, hint: "Billing not live yet" },
+    { label: "Trial / free", value: active.length, hint: "Pilot" },
+    { label: "New, 30 days", value: cs.filter((c) => FA.daysAgo(c.created_at) <= 30).length },
+    { label: "Active, 30 days", value: cs.filter((c) => c.records_30d > 0).length, hint: `${D.totals.records_7d} records this week`, tone: "ok" },
+    { label: "Visitors, 7 days", value: "…", hint: "Website" }]);
+  api("/api/admin/stats?days=7").then((s) => { P.tiles.lastElementChild.querySelector("b").textContent = s.week; }).catch(() => {});
+  // 3. needs you
+  const resets = D.resets.filter((r) => !r.used && !r.emailed);
+  FA.needs(P.needs, resets.map((r) => ({ tone: "warn",
+    html: `<span><b>${esc(r.name)}</b> (${esc(r.email)}) asked for a new password ${esc(fmt(r.at))}.</span>
+      <button class="small" data-reset="${r.user_id}">New password</button><div data-out="${r.user_id}"></div>` })));
+  // 4. customers
+  const role = (u) => `<select data-role="${u.id}" style="margin:0;padding:6px;width:auto">${Object.entries(D.roles).map(([k, v]) => `<option value="${k}" ${k === u.role ? "selected" : ""}>${esc(v)}</option>`).join("")}</select>`;
+  FA.customers(P.customers, cs, {
+    filters: [{ key: "all", label: "All", test: () => true }, { key: "paying", label: "Paying", test: () => false },
+      { key: "trial", label: "Trial / free", test: (c) => c.active }, { key: "off", label: "Off", test: (c) => !c.active }],
+    text: (c) => [c.name, c.email, ...c.users.map((u) => u.name + " " + u.email)].join(" "),
+    empty: "No companies yet.",
+    toCard: (c) => ({ id: c.id, name: c.name, off: !c.active,
+      badge: c.active ? { text: "Pilot", tone: "ok" } : { text: "Switched off", tone: "bad" },
+      meta: [c.users[0] && c.users[0].name, c.email, `signed up ${fmt(c.created_at).slice(0, 10)}`, c.invite && `invite ${c.invite}`],
+      usage: `${c.sites} site(s) · ${c.workers} worker(s) · ${c.records} record(s), ${c.records_7d} this week · last activity ${fmt(c.last_activity)}`,
+      actions: `<button class="small" data-co="${c.id}" data-on="${c.active ? 0 : 1}">${c.active ? "Switch company off" : "Switch company on"}</button>`,
+      extra: `<details><summary class="small">Logins (${c.users.length})</summary>
+        <table class="users" style="margin-top:6px"><tr><th>Name</th><th>Email</th><th>Role</th><th>Last login</th><th></th></tr>
+        ${c.users.map((u) => `<tr class="${u.active ? "" : "off"}"><td>${esc(u.name)}</td><td>${esc(u.email)}</td><td>${role(u)}</td><td>${fmt(u.last_login_at)}</td>
           <td><div class="actions-row"><button class="small" data-reset="${u.id}">New password</button>
             <button class="small" data-user="${u.id}" data-on="${u.active ? 0 : 1}">${u.active ? "Switch off" : "Switch on"}</button></div>
             <div data-out="${u.id}"></div></td></tr>`).join("")}</table>
-      <details style="margin-top:6px"><summary class="small">+ Add a login to this company</summary>
-        <div class="grid2"><input data-new-name="${c.id}" placeholder="Name"><input data-new-email="${c.id}" placeholder="Email"></div>
+        <div class="grid2" style="margin-top:8px"><input data-new-name="${c.id}" placeholder="Name"><input data-new-email="${c.id}" placeholder="Email"></div>
         <select data-new-role="${c.id}">${Object.entries(D.roles).map(([k, v]) => `<option value="${k}">${esc(v)}</option>`).join("")}</select>
-        <button class="small primary" data-add="${c.id}">Add login</button><div data-add-out="${c.id}"></div></details></div>`).join("") || `<p class="muted">No companies yet.</p>`}`;
+        <button class="small primary" data-add="${c.id}">Add login</button></details>` }) });
+  // 5. sign-ups: invite codes
+  P.signups.innerHTML = `<p class="small muted" style="margin-top:0">Sign-up needs an invite code. Sign-up page: ${esc(location.origin)}/app.html#signup</p>
+    <table class="users"><tr><th>Code</th><th>For</th><th>Sign-ups</th><th>Status</th><th></th></tr>
+      ${D.invites.map((i) => `<tr class="${i.active ? "" : "off"}"><td><b>${esc(i.code)}</b></td><td>${esc(i.label)}</td><td>${i.uses}</td>
+        <td>${FA.badge(i.active ? "Active" : "Off", i.active ? "ok" : "")}</td>
+        <td><button class="small" data-inv="${esc(i.code)}" data-on="${i.active ? 0 : 1}">${i.active ? "Switch off" : "Switch on"}</button></td></tr>`).join("")}
+      ${D.env_invites.map((c) => `<tr><td><b>${esc(c)}</b></td><td class="muted">set in Railway (HAS_SIGNUP_CODE)</td><td></td><td>${FA.badge("Active", "ok")}</td><td></td></tr>`).join("")}</table>
+    <div class="row" style="margin-top:10px"><input id="inv-label" placeholder="Who is it for? (e.g. Pieter, Plett Builders)" style="margin:0"><button class="small primary" id="inv-add">New code</button></div>
+    <div id="inv-out"></div>`;
+  // 6. website visitors
+  loadVisitors(P.visitors);
 }
 document.addEventListener("click", async (e) => {
   const b = e.target.closest("button"); if (!b) return;
@@ -149,7 +174,8 @@ document.addEventListener("click", async (e) => {
       const r = await api("/api/admin/companies", { json: { name: $("#nc-name").value, owner: $("#nc-owner").value, email: $("#nc-email").value.trim() } });
       await load();
       const msg = `Your SiteBakkie login is ready.\nOpen ${location.origin}/app.html\nEmail: ${r.email}\nTemporary password: ${r.temp_password}\nChange it under More → My profile.`;
-      $("#view").insertAdjacentHTML("afterbegin", `<div class="note ok"><b>Company made.</b> Send this to the owner:<pre style="white-space:pre-wrap;margin:8px 0 0">${esc(msg)}</pre></div>`);
+      $("#fa-add").classList.remove("hidden");
+      $("#fa-add").insertAdjacentHTML("beforeend", `<div class="note ok"><b>Account made.</b> Send this to the owner:<pre style="white-space:pre-wrap;margin:8px 0 0">${esc(msg)}</pre></div>`);
       scrollTo(0, 0);
     } else if (b.id === "inv-add") {
       const r = await api("/api/admin/invites", { json: { label: $("#inv-label").value } });
