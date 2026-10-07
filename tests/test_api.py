@@ -417,3 +417,16 @@ def test_company_defaults_copy_site_and_plan_without_spec(co, monkeypatch):
     text = "".join(pg.extract_text() for pg in PdfReader(io.BytesIO(
         client.get(f"/api/hs-plan/pdf?site_id={sid}", headers=h).content)).pages)
     assert "None provided for this site" in text and "provided no health and safety" in text
+
+
+def test_admin_login_with_own_password(monkeypatch):
+    email = f"boss-{uuid.uuid4().hex[:6]}@test.co"
+    assert client.post("/api/signup", json={"company": "Boss Co", "name": "Boss", "email": email,
+                                            "password": "boss-pass-1"}).status_code == 200
+    assert client.post("/api/admin/login", json={"email": email, "password": "boss-pass-1"}).status_code == 401
+    monkeypatch.setattr(server, "ADMIN_EMAILS", {email})
+    assert client.post("/api/admin/login", json={"email": email, "password": "wrong-pass"}).status_code == 401
+    tok = client.post("/api/admin/login", json={"email": email.upper(), "password": "boss-pass-1"}).json()["token"]
+    assert client.get("/api/admin/overview", headers={"X-Token": tok}).status_code == 200
+    monkeypatch.setattr(server, "ADMIN_EMAILS", set())
+    assert client.get("/api/admin/overview", headers={"X-Token": tok}).status_code == 401

@@ -26,9 +26,10 @@
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-let code = null; try { code = localStorage.getItem("sb-admin"); } catch {}
+let code = null, tok = null; try { code = localStorage.getItem("sb-admin"); tok = localStorage.getItem("sb-admin-token"); } catch {}
 async function api(path, opts = {}) {
-  const r = await fetch(path, { method: opts.method || (opts.json ? "POST" : "GET"), headers: { "X-Admin": code, "Content-Type": "application/json" },
+  const h = { "Content-Type": "application/json" }; if (tok) h["X-Token"] = tok; if (code) h["X-Admin"] = code;
+  const r = await fetch(path, { method: opts.method || (opts.json ? "POST" : "GET"), headers: h,
     body: opts.json ? JSON.stringify(opts.json) : undefined });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) { const e = new Error(d.detail || "Failed"); e.status = r.status; throw e; }
@@ -38,15 +39,35 @@ const fmt = (t) => t ? t.replace("T", " ") : "never";
 function login(msg = "") {
   $("#out").classList.add("hidden");
   $("#view").innerHTML = `<div class="page-head"><h1>Admin</h1><p>All companies and logins on SiteBakkie.</p></div>
-    <div class="card" style="max-width:420px"><label>Admin code</label><input id="code" type="password" autocomplete="current-password">
-    <button class="primary" id="go">Open</button><p class="crit small">${esc(msg)}</p></div>`;
-  $("#go").onclick = () => { code = $("#code").value.trim(); try { localStorage.setItem("sb-admin", code); } catch {} load(); };
-  $("#code").onkeydown = (e) => { if (e.key === "Enter") $("#go").click(); };
+    <form class="card" id="al" style="max-width:420px" method="post" action="#">
+      <label for="al-email">Email</label><input id="al-email" name="username" type="email" autocomplete="username" autocapitalize="off" required>
+      <label for="al-pw">Password</label><input id="al-pw" name="password" type="password" autocomplete="current-password" required>
+      <button class="primary" type="submit">Log in</button><p class="crit small">${esc(msg)}</p>
+      <details class="small"><summary>Use the admin code instead</summary><input id="code" type="password" autocomplete="off" placeholder="Admin code">
+        <button class="small" type="button" id="go">Open</button></details></form>`;
+  $("#al").onsubmit = async (e) => {
+    e.preventDefault();
+    const r = await fetch("/api/admin/login", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: $("#al-email").value.trim(), password: $("#al-pw").value }) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) return login(d.detail || "Could not log in.");
+    tok = d.token; code = null;
+    try { localStorage.setItem("sb-admin-token", tok); localStorage.removeItem("sb-admin"); } catch {}
+    history.replaceState(null, "", "/admin.html");   // a page change tells the browser the login worked, so it offers to save
+    load();
+  };
+  $("#go").onclick = () => { code = $("#code").value.trim(); tok = null; try { localStorage.setItem("sb-admin", code); } catch {} load(); };
 }
-$("#out").onclick = () => { try { localStorage.removeItem("sb-admin"); } catch {} code = null; login(); };
+$("#out").onclick = () => {
+  if (tok) fetch("/api/logout", { method: "POST", headers: { "X-Token": tok } }).catch(() => {});
+  try { localStorage.removeItem("sb-admin"); localStorage.removeItem("sb-admin-token"); } catch {} code = tok = null; login();
+};
 let D = null;
 async function load() {
-  try { D = await api("/api/admin/overview"); } catch (e) { return login(e.status === 401 ? "Wrong admin code." : e.message); }
+  try { D = await api("/api/admin/overview"); } catch (e) {
+    if (e.status === 401) { tok = code = null; try { localStorage.removeItem("sb-admin"); localStorage.removeItem("sb-admin-token"); } catch {} }
+    return login(e.status === 401 ? "Log in again." : e.message);
+  }
   $("#out").classList.remove("hidden");
   const t = D.totals;
   $("#view").innerHTML = `<div class="page-head"><h1>Admin</h1><p>Every company and login on SiteBakkie. Temporary passwords show once; give them to the person.</p></div>
@@ -119,7 +140,7 @@ document.addEventListener("change", async (e) => {
   const id = e.target.dataset.role; if (!id) return;
   try { await api(`/api/admin/users/${id}`, { method: "PUT", json: { role: e.target.value } }); } catch (err) { alert(err.message); load(); }
 });
-code ? load() : login();
+code || tok ? load() : login();
 </script>
 </body>
 </html>

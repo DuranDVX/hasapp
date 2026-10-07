@@ -2011,11 +2011,42 @@ def _admin_token() -> str:
 ADMIN_TOKEN = _admin_token()
 
 
-def admin(x_admin: str = Header(None)) -> None:
+# Platform admins log in with their own SiteBakkie email and password, so the
+# browser's password manager saves and fills it. The admin code still works.
+ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+
+
+def _admin_session(token: str) -> bool:
+    if not token or not ADMIN_EMAILS:
+        return False
+    with db.session() as s:
+        sess = s.get(db.Session, auth._th(token))
+        if not sess or sess.expires_at < db.utcnow():
+            return False
+        u = s.get(db.User, sess.user_id)
+        return bool(u and u.active and u.email in ADMIN_EMAILS)
+
+
+def admin(x_admin: str = Header(None), x_token: str = Header(None)) -> None:
     import hmac as _h
-    if not x_admin or not _h.compare_digest(x_admin, ADMIN_TOKEN):
-        time.sleep(0.5)
-        raise HTTPException(401, "Wrong admin code.")
+    if x_admin and _h.compare_digest(x_admin, ADMIN_TOKEN):
+        return
+    if _admin_session(x_token):
+        return
+    time.sleep(0.5)
+    raise HTTPException(401, "Log in as a SiteBakkie admin.")
+
+
+@app.post("/api/admin/login")
+def admin_login(body: dict = Body(...)):
+    email = _s(body.get("email")).lower()
+    with db.session() as s:
+        u = s.scalar(select(db.User).where(db.User.email == email))
+        if not u or not u.active or email not in ADMIN_EMAILS or not auth.check_pw(body.get("password", ""), u.pw_hash):
+            time.sleep(0.5)
+            raise HTTPException(401, "Wrong email or password, or this login is not an admin.")
+        u.last_login_at = db.utcnow()
+        return {"token": auth.new_session(s, u)}
 
 
 def _admin_user(u: db.User) -> dict:
