@@ -82,6 +82,8 @@ SiteBakkie. Say the day. The safety file keeps itself. Try it free at sitebakkie
 ---
 
 ## 3. AI video prompts: site scenes
+> **Superseded:** the phone-screen shots in sections 3 and 5 proved hard for AI tools. Use `scenes-per-person.md` ("SiteBakkie scenes per person.md"): the phone is always seen from behind.
+
 
 ### How to use these
 
