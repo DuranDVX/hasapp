@@ -2042,9 +2042,13 @@ def admin_login(body: dict = Body(...)):
     email = _s(body.get("email")).lower()
     with db.session() as s:
         u = s.scalar(select(db.User).where(db.User.email == email))
-        if not u or not u.active or email not in ADMIN_EMAILS or not auth.check_pw(body.get("password", ""), u.pw_hash):
+        if not u or not u.active or not auth.check_pw(body.get("password", ""), u.pw_hash):
+            log.info("admin login failed for %s: %s", email, "no such login" if not u else "wrong password")
             time.sleep(0.5)
-            raise HTTPException(401, "Wrong email or password, or this login is not an admin.")
+            raise HTTPException(401, "Wrong email or password. Use the password you use in the SiteBakkie app.")
+        if email not in ADMIN_EMAILS:
+            log.info("admin login refused for %s: not in ADMIN_EMAILS (%d set)", email, len(ADMIN_EMAILS))
+            raise HTTPException(403, "This login is not a SiteBakkie admin.")
         u.last_login_at = db.utcnow()
         return {"token": auth.new_session(s, u)}
 

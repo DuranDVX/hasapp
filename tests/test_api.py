@@ -423,7 +423,7 @@ def test_admin_login_with_own_password(monkeypatch):
     email = f"boss-{uuid.uuid4().hex[:6]}@test.co"
     assert client.post("/api/signup", json={"company": "Boss Co", "name": "Boss", "email": email,
                                             "password": "boss-pass-1"}).status_code == 200
-    assert client.post("/api/admin/login", json={"email": email, "password": "boss-pass-1"}).status_code == 401
+    assert client.post("/api/admin/login", json={"email": email, "password": "boss-pass-1"}).status_code == 403
     monkeypatch.setattr(server, "ADMIN_EMAILS", {email})
     assert client.post("/api/admin/login", json={"email": email, "password": "wrong-pass"}).status_code == 401
     tok = client.post("/api/admin/login", json={"email": email.upper(), "password": "boss-pass-1"}).json()["token"]
