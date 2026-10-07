@@ -1,7 +1,7 @@
 // SiteBakkie service worker: the app shell works with no signal.
 // App files: network first (a deploy shows at once), cache after 3 s or offline.
 // API calls are never cached here; the app keeps its own offline data in IndexedDB.
-const CACHE = "sitebakkie-v10";
+const CACHE = "sitebakkie-v11";
 const SHELL = ["/app.html", "/style.css", "/idb.js", "/sign.js", "/app.js", "/forms.js", "/manage.js", "/board.js", "/registers.js", "/consultant.js",
   "/manifest.webmanifest", "/icon-192.png", "/icon-512.png", "/logo-head.png", "/mark-head.png"];
 

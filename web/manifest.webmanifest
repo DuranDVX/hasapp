@@ -3,7 +3,7 @@
   "short_name": "SiteBakkie",
   "description": "Construction site health and safety: task sheets, toolbox talks, checks and the safety file.",
   "start_url": "/app.html",
-  "scope": "/",
+  "scope": "/app",
   "display": "standalone",
   "background_color": "#ffffff",
   "theme_color": "#10202e",
