@@ -473,7 +473,9 @@ VIEWS.file = async () => {
     ${secs.map((s, i) => {
       const mine = docs.filter((d) => d.section === s.key);
       const auto = s.type.includes("auto");
-      const status = mine.length ? `<span class="badge ok">${mine.length} doc${mine.length > 1 ? "s" : ""}</span>` : auto ? '<span class="badge">From records</span>' : '<span class="badge bad">Missing</span>';
+      const notNeeded = s.key === "client_spec" && S.data.site.spec_provided === false;   // the client gave no spec
+      const status = mine.length ? `<span class="badge ok">${mine.length} doc${mine.length > 1 ? "s" : ""}</span>` : notNeeded ? '<span class="badge">Not needed</span>'
+        : auto ? '<span class="badge">From records</span>' : '<span class="badge bad">Missing</span>';
       return `<div class="card"><div class="row between"><div class="grow"><b>${i + 1}. ${esc(s.title)}</b></div>${status}</div>
         ${mine.map((d) => `<div class="row small" style="margin-top:6px"><a class="grow" href="${d.file_url}" target="_blank">📄 ${esc(d.title)}</a>
           ${d.expires ? `<span class="badge ${d.status === "expired" ? "bad" : d.status === "expiring" ? "warn" : "ok"}">exp ${esc(d.expires)}</span>` : ""}
