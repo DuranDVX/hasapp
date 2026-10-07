@@ -224,3 +224,17 @@ def test_safety_file_includes_new_sections(co):
     r = client.get(f"/api/sites/{co['site']['id']}/file.pdf", headers=co["h"])
     text = "".join(p.extract_text() for p in PdfReader(io.BytesIO(r.content)).pages)
     assert "Coastal Plumbing" in text and "Inspector X" in text and "List of contractors" in text
+
+
+def test_no_client_spec_tile_when_client_gave_none():
+    from app import compliance
+    from app import db as _db
+    import uuid as _u
+    from datetime import date as _d
+    with _db.session() as s:
+        c = _db.Company(name=f"NoSpec {_u.uuid4().hex[:4]}"); s.add(c); s.flush()
+        site = _db.Site(company_id=c.id, name="X", settings={"spec_provided": False}); s.add(site); s.flush()
+        keys = [t["key"] for t in compliance.board(s, c, site, _d.today())["tiles"]]
+        assert "client_spec" not in keys
+        site.settings = {"spec_provided": True}
+        assert "client_spec" in [t["key"] for t in compliance.board(s, c, site, _d.today())["tiles"]]

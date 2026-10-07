@@ -4,3 +4,6 @@ data/
 __pycache__/
 .pytest_cache/
 .DS_Store
+brand/video/out/
+brand/video/shots/
+brand/video/slides/

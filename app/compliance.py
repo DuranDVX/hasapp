@@ -249,7 +249,8 @@ def board(s, company: db.Company, site: db.Site, today: date, now_hour: int = 12
                            else "Drafted in the app. Check it and issue it for signature.", "hsplan"))
     else:
         doc_tile("hs_plan", "hs_plan", "H&S plan (approved)", "7(1)(a)", action="hsplan")
-    doc_tile("client_spec", "client_spec", "Client H&S specification", "5(1)(b)")
+    if (site.settings or {}).get("spec_provided") is not False:   # the client gave no spec: nothing to file
+        doc_tile("client_spec", "client_spec", "Client H&S specification", "5(1)(b)")
     doc_tile("notification", "notification", "Notification / work permit", "3, 4")
     doc_tile("coid", "company", "COID letter of good standing", "5(1)(j)")
     doc_tile("fall_plan", "fall_protection", "Fall protection plan", "10", "work_at_height")

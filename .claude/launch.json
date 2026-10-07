@@ -4,8 +4,31 @@
     {
       "name": "hasapp",
       "runtimeExecutable": ".venv/bin/uvicorn",
-      "runtimeArgs": ["app.server:app", "--host", "0.0.0.0", "--port", "8500", "--reload"],
+      "runtimeArgs": [
+        "app.server:app",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8500",
+        "--reload"
+      ],
       "port": 8500
+    },
+    {
+      "name": "hasapp-video",
+      "runtimeExecutable": "/usr/bin/env",
+      "runtimeArgs": [
+        "HAS_DATA=/private/tmp/claude-501/-Users-duranx/375f6b07-b591-4990-b8e4-660e66b81514/scratchpad/videodata",
+        "DATABASE_URL=sqlite:////private/tmp/claude-501/-Users-duranx/375f6b07-b591-4990-b8e4-660e66b81514/scratchpad/videodata/video.db",
+        "HAS_WARM_STT=0",
+        ".venv/bin/uvicorn",
+        "app.server:app",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "8510"
+      ],
+      "port": 8510
     }
   ]
 }

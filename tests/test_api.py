@@ -446,3 +446,14 @@ def test_family_admin_login_setpw_handoff(monkeypatch):
     assert client.post("/api/family/redeem", json={"ticket": ticket, "app": "quotebakkie"}).status_code == 401  # once
     client.post("/api/family/logout", headers=h)
     assert client.get("/api/admin/overview", headers=h).status_code == 401
+
+
+def test_every_checklist_can_be_saved(co):
+    """Some checklists have no 'critical' flag on their items; saving them must still work."""
+    for key, tpl in library.CHECKLISTS.items():
+        if tpl.get("kind") == "plant":
+            continue
+        body = {"client_id": uuid.uuid4().hex, "site_id": co["site"]["id"], "kind": "check", "record_date": "2026-10-06",
+                "payload": {"template": key, "answers": [{"answer": "ok"}] * len(tpl["items"])},
+                "signatures": [sig(worker=co["w2"]["id"], role="inspector")]}
+        assert client.post("/api/records", json=body, headers=co["h"]).status_code == 200, key

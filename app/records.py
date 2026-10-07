@@ -139,8 +139,8 @@ def _check(s, cid, site_id, p: dict) -> dict:
         if ans not in ("ok", "defect", "na"):
             raise HTTPException(400, "Answer every item on the checklist.")
         if ans == "defect":
-            result = "fail" if q["critical"] or result == "fail" else "defects"
-        item = {"q": q["q"], "critical": q["critical"], "answer": ans,
+            result = "fail" if q.get("critical") or result == "fail" else "defects"
+        item = {"q": q["q"], "critical": bool(q.get("critical")), "answer": ans,
                 "note": _text(a.get("note"), 500)}
         if a.get("photo"):
             item["photo"] = a["photo"]
