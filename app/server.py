@@ -40,6 +40,7 @@ logging.getLogger("uvicorn.access").addFilter(_Redact())
 @asynccontextmanager
 async def _lifespan(_app):
     db.init()
+    _reset_on_start()
     if os.getenv("HAS_WARM_STT", "1") == "1":
         stt.warm_up()
     yield
@@ -330,6 +331,23 @@ def login(body: dict = Body(...)):
 
 
 RESET_TTL = timedelta(hours=2)
+
+
+def _reset_on_start() -> None:
+    """Recovery without email: set ADMIN_RESET_EMAIL on the server and a one-time reset link for that
+    login goes to the server log. Remove the variable after use."""
+    email = os.getenv("ADMIN_RESET_EMAIL", "").strip().lower()
+    if not email:
+        return
+    with db.session() as s:
+        u = s.scalar(select(db.User).where(db.User.email == email))
+        if not u:
+            log.warning("ADMIN_RESET_EMAIL: no login for %s", email)
+            return
+        token = secrets.token_urlsafe(24)
+        s.add(db.PasswordReset(token_hash=auth._th(token), user_id=u.id, expires_at=db.utcnow() + RESET_TTL))
+    log.warning("ADMIN_RESET_EMAIL: one-time reset link for %s (2 hours): %s/app.html#reset/%s",
+                email, config.PUBLIC_URL, token)
 
 
 @app.post("/api/password/forgot")
