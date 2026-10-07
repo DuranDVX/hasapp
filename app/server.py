@@ -337,10 +337,16 @@ def _reset_on_start() -> None:
     """Recovery without email: set ADMIN_RESET_EMAIL on the server and a one-time reset link for that
     login goes to the server log. Remove the variable after use."""
     email = os.getenv("ADMIN_RESET_EMAIL", "").strip().lower()
+    old_email = os.getenv("ADMIN_RESET_FROM", "").strip().lower()   # optional: move that login to the new email
     if not email:
         return
     with db.session() as s:
         u = s.scalar(select(db.User).where(db.User.email == email))
+        if not u and old_email:
+            u = s.scalar(select(db.User).where(db.User.email == old_email))
+            if u:
+                u.email = email
+                log.warning("ADMIN_RESET_EMAIL: login %s is now %s", old_email, email)
         if not u:
             log.warning("ADMIN_RESET_EMAIL: no login for %s", email)
             return
