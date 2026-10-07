@@ -334,25 +334,20 @@ RESET_TTL = timedelta(hours=2)
 
 
 def _reset_on_start() -> None:
-    """Recovery without email: set ADMIN_RESET_EMAIL on the server and a one-time reset link for that
-    login goes to the server log. Remove the variable after use."""
+    """Recovery without email: set ADMIN_RESET_EMAIL on the server. The family admin account
+    for that email is made if it does not exist, and a one-time set-password link (2 hours)
+    goes to the server log. Remove the variable after use."""
     email = os.getenv("ADMIN_RESET_EMAIL", "").strip().lower()
-    old_email = os.getenv("ADMIN_RESET_FROM", "").strip().lower()   # optional: move that login to the new email
-    if not email:
+    if "@" not in email:
         return
     with db.session() as s:
-        u = s.scalar(select(db.User).where(db.User.email == email))
-        if not u and old_email:
-            u = s.scalar(select(db.User).where(db.User.email == old_email))
-            if u:
-                u.email = email
-                log.warning("ADMIN_RESET_EMAIL: login %s is now %s", old_email, email)
-        if not u:
-            log.warning("ADMIN_RESET_EMAIL: no login for %s", email)
-            return
-        token = secrets.token_urlsafe(24)
-        s.add(db.PasswordReset(token_hash=auth._th(token), user_id=u.id, expires_at=db.utcnow() + RESET_TTL))
-    log.warning("ADMIN_RESET_EMAIL: one-time reset link for %s (2 hours): %s/app.html#reset/%s",
+        a = s.scalar(select(db.PlatformAdmin).where(db.PlatformAdmin.email == email))
+        if not a:
+            a = db.PlatformAdmin(email=email, name="Bakkie admin")
+            s.add(a)
+            s.flush()
+        token = _ticket(s, a.id, "setpw", RESET_TTL)
+    log.warning("ADMIN_RESET_EMAIL: one-time set-password link for %s (2 hours): %s/admin.html#setpw/%s",
                 email, config.PUBLIC_URL, token)
 
 
@@ -2035,46 +2030,142 @@ def _admin_token() -> str:
 ADMIN_TOKEN = _admin_token()
 
 
-# Platform admins log in with their own SiteBakkie email and password, so the
-# browser's password manager saves and fills it. The admin code still works.
-ADMIN_EMAILS = {e.strip().lower() for e in os.getenv("ADMIN_EMAILS", "").split(",") if e.strip()}
+# ---------------------------------------------------------------- Bakkie family admin
+# One admin login for SiteBakkie and QuoteBakkie. SiteBakkie holds the admin accounts;
+# QuoteBakkie trusts a one-time hand-over ticket that it redeems here. The admin code
+# (ADMIN_TOKEN) still works for this app.
+FAMILY_APPS = {
+    "sitebakkie": {"name": "SiteBakkie", "url": f"{config.PUBLIC_URL}/admin.html"},
+    "quotebakkie": {"name": "QuoteBakkie",
+                    "url": os.getenv("QUOTEBAKKIE_ADMIN_URL", "https://www.quotebakkie.co.za/admin.html")},
+}
+ADMIN_SESSION_TTL = timedelta(days=30)
+HANDOFF_TTL = timedelta(seconds=90)
 
 
-def _admin_session(token: str) -> bool:
-    if not token or not ADMIN_EMAILS:
-        return False
+def _family_admin(token: str | None):
+    if not token:
+        return None
     with db.session() as s:
-        sess = s.get(db.Session, auth._th(token))
+        sess = s.get(db.AdminSession, auth._th(token))
         if not sess or sess.expires_at < db.utcnow():
-            return False
-        u = s.get(db.User, sess.user_id)
-        return bool(u and u.active and u.email in ADMIN_EMAILS)
+            return None
+        a = s.get(db.PlatformAdmin, sess.admin_id)
+        return {"id": a.id, "email": a.email, "name": a.name} if a and a.active else None
 
 
-def admin(x_admin: str = Header(None), x_token: str = Header(None)) -> None:
+def admin(x_admin: str = Header(None), x_admin_session: str = Header(None)) -> None:
     import hmac as _h
     if x_admin and _h.compare_digest(x_admin, ADMIN_TOKEN):
         return
-    if _admin_session(x_token):
+    if _family_admin(x_admin_session):
         return
     time.sleep(0.5)
-    raise HTTPException(401, "Log in as a SiteBakkie admin.")
+    raise HTTPException(401, "Log in as a Bakkie admin.")
 
 
-@app.post("/api/admin/login")
-def admin_login(body: dict = Body(...)):
+def _ticket(s, admin_id: str, purpose: str, ttl: timedelta) -> str:
+    token = secrets.token_urlsafe(24)
+    s.add(db.AdminTicket(token_hash=auth._th(token), admin_id=admin_id, purpose=purpose,
+                         expires_at=db.utcnow() + ttl))
+    return token
+
+
+def _use_ticket(s, token: str, purpose: str):
+    t = s.get(db.AdminTicket, auth._th(_s(token, 100)))
+    if not t or t.purpose != purpose or t.used_at or t.expires_at < db.utcnow():
+        return None
+    t.used_at = db.utcnow()
+    a = s.get(db.PlatformAdmin, t.admin_id)
+    return a if a and a.active else None
+
+
+def _admin_login_out(s, a: db.PlatformAdmin) -> dict:
+    token = secrets.token_urlsafe(32)
+    s.add(db.AdminSession(token_hash=auth._th(token), admin_id=a.id, expires_at=db.utcnow() + ADMIN_SESSION_TTL))
+    a.last_login_at = db.utcnow()
+    return {"token": token, "email": a.email, "name": a.name}
+
+
+@app.post("/api/family/login")
+def family_login(body: dict = Body(...)):
     email = _s(body.get("email")).lower()
     with db.session() as s:
-        u = s.scalar(select(db.User).where(db.User.email == email))
-        if not u or not u.active or not auth.check_pw(body.get("password", ""), u.pw_hash):
-            log.info("admin login failed for %s: %s", email, "no such login" if not u else "wrong password")
+        a = s.scalar(select(db.PlatformAdmin).where(db.PlatformAdmin.email == email))
+        if not a or not a.active or not a.pw_hash or not auth.check_pw(body.get("password", ""), a.pw_hash):
+            log.info("family admin login failed for %s", email)
             time.sleep(0.5)
-            raise HTTPException(401, "Wrong email or password. Use the password you use in the SiteBakkie app.")
-        if email not in ADMIN_EMAILS:
-            log.info("admin login refused for %s: not in ADMIN_EMAILS (%d set)", email, len(ADMIN_EMAILS))
-            raise HTTPException(403, "This login is not a SiteBakkie admin.")
-        u.last_login_at = db.utcnow()
-        return {"token": auth.new_session(s, u)}
+            raise HTTPException(401, "Wrong email or password.")
+        return _admin_login_out(s, a)
+
+
+@app.post("/api/family/password")
+def family_set_password(body: dict = Body(...)):
+    """Set the password from a one-time link (#setpw/<token>), then log in."""
+    auth.valid_pw(body.get("password", ""))
+    with db.session() as s:
+        a = _use_ticket(s, body.get("token", ""), "setpw")
+        if not a:
+            raise HTTPException(400, "This link is old or used. Ask for a new one.")
+        a.pw_hash = auth.hash_pw(body["password"])
+        s.query(db.AdminSession).filter_by(admin_id=a.id).delete()
+        return _admin_login_out(s, a)
+
+
+@app.get("/api/family/setpw-email")
+def family_setpw_email(token: str):
+    """The email a set-password link is for, so the form (and the password manager) shows it. Does not use the link."""
+    with db.session() as s:
+        t = s.get(db.AdminTicket, auth._th(_s(token, 100)))
+        if not t or t.purpose != "setpw" or t.used_at or t.expires_at < db.utcnow():
+            raise HTTPException(400, "This link is old or used. Ask for a new one.")
+        return {"email": s.get(db.PlatformAdmin, t.admin_id).email}
+
+
+@app.post("/api/family/logout")
+def family_logout(x_admin_session: str = Header(None)):
+    if x_admin_session:
+        with db.session() as s:
+            s.query(db.AdminSession).filter_by(token_hash=auth._th(x_admin_session)).delete()
+    return {"ok": True}
+
+
+@app.get("/api/family/me")
+def family_me(x_admin_session: str = Header(None)):
+    a = _family_admin(x_admin_session)
+    if not a:
+        raise HTTPException(401, "Log in as a Bakkie admin.")
+    return a | {"apps": [{"key": k, **v} for k, v in FAMILY_APPS.items()]}
+
+
+@app.post("/api/family/handoff")
+def family_handoff(body: dict = Body(...), x_admin_session: str = Header(None)):
+    """A one-time ticket (90 s) that opens another family app's admin panel without a second login."""
+    a = _family_admin(x_admin_session)
+    if not a:
+        raise HTTPException(401, "Log in as a Bakkie admin.")
+    key = body.get("app")
+    if key not in FAMILY_APPS or key == "sitebakkie":
+        raise HTTPException(400, "Unknown app.")
+    with db.session() as s:
+        token = _ticket(s, a["id"], f"handoff:{key}", HANDOFF_TTL)
+    return {"url": f"{FAMILY_APPS[key]['url']}#sso={token}"}
+
+
+@app.post("/api/family/redeem")
+def family_redeem(body: dict = Body(...)):
+    """Called by the other app's server: is this hand-over ticket good? Works once."""
+    key = body.get("app")
+    if key not in FAMILY_APPS:
+        raise HTTPException(400, "Unknown app.")
+    with db.session() as s:
+        a = _use_ticket(s, body.get("ticket", ""), f"handoff:{key}")
+        if not a:
+            time.sleep(0.5)
+            raise HTTPException(401, "This hand-over is old or used. Log in again.")
+        log.info("family admin %s opened %s", a.email, key)
+        return {"email": a.email, "name": a.name,
+                "apps": [{"key": k, **v} for k, v in FAMILY_APPS.items()]}
 
 
 def _admin_user(u: db.User) -> dict:

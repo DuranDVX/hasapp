@@ -1,0 +1,114 @@
+/* Bakkie family admin: the same look for SiteBakkie and QuoteBakkie.
+   This file is identical in both apps. Only the accent changes, set by
+   <html data-app="sitebakkie|quotebakkie">. Change it in one app, copy it to the other. */
+:root {
+  --accent: #f26b1d; --accent-dk: #c4500c; --accent-bg: #fff1e8;
+  --navy: #122433; --ink: #15202b; --muted: #5b6b7b; --line: #e3e8ee; --bg: #f4f6f9; --card: #fff;
+  --ok: #0d6b39; --ok-bg: #e3f5ea; --bad: #a3221a; --bad-bg: #fde7e4; --warn: #8f4a00; --warn-bg: #fff1dc;
+  --sb: #f26b1d; --qb: #18b169;
+}
+html[data-app="quotebakkie"] { --accent: #18b169; --accent-dk: #0f7a4a; --accent-bg: #e6f6ee; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: var(--bg); color: var(--ink);
+  font: 15px/1.5 Inter, -apple-system, "Segoe UI", Roboto, sans-serif; }
+a { color: var(--accent-dk); }
+.hidden { display: none !important; }
+
+/* header with the app switcher */
+.fa-head { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  padding: 10px 20px; background: #fff; border-bottom: 1px solid var(--line); }
+.fa-head .logo { height: 30px; width: auto; display: block; }
+.fa-tag { font-weight: 800; font-size: 13px; letter-spacing: .6px; text-transform: uppercase; color: var(--muted); }
+.fa-switch { display: flex; gap: 6px; background: var(--bg); padding: 4px; border-radius: 12px; }
+.fa-switch a, .fa-switch button { display: inline-flex; align-items: center; gap: 7px; padding: 7px 12px; border-radius: 9px; border: 0;
+  background: transparent; font: inherit; font-weight: 700; font-size: 14px; color: var(--muted); text-decoration: none; cursor: pointer; }
+.fa-switch .dot { width: 9px; height: 9px; border-radius: 50%; }
+.fa-switch .on { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(18,36,51,.12); }
+.fa-grow { flex: 1; }
+.fa-who { font-size: 13px; color: var(--muted); }
+
+main, .fa-main { max-width: 1100px; margin: 0 auto; padding: 20px 20px 48px; }
+h1 { font-size: 26px; margin: 4px 0 4px; letter-spacing: -.4px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .8px; color: var(--muted); margin: 26px 0 10px; }
+.page-head p { color: var(--muted); margin: 0 0 14px; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 16px; margin-bottom: 12px;
+  box-shadow: 0 1px 2px rgba(18,36,51,.05); }
+.row { display: flex; gap: 10px; align-items: center; }
+.between { justify-content: space-between; }
+.wrap { flex-wrap: wrap; }
+.grow { flex: 1; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.two { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+.center { text-align: center; }
+.off { opacity: .55; }
+code { background: var(--bg); padding: 1px 5px; border-radius: 5px; }
+
+/* form controls */
+label { display: block; font-size: 13px; font-weight: 600; color: var(--muted); margin-top: 8px; }
+input, select, textarea { width: 100%; font: inherit; font-size: 15px; padding: 10px 12px; border: 1.5px solid var(--line);
+  border-radius: 10px; background: #fff; color: var(--ink); margin: 4px 0 8px; }
+input:focus, select:focus, textarea:focus { outline: 0; border-color: var(--accent); }
+button, .btn { font: inherit; font-weight: 700; font-size: 14px; padding: 9px 14px; border-radius: 10px; cursor: pointer;
+  border: 1.5px solid var(--line); background: #fff; color: var(--ink); text-decoration: none; display: inline-flex;
+  align-items: center; justify-content: center; gap: 6px; }
+button:hover { border-color: var(--ink); }
+button.primary, .btn.primary { background: var(--accent-dk); border-color: var(--accent-dk); color: #fff; }
+button.danger, button.mini.danger { color: var(--bad); border-color: #f2c4bf; }
+button.small, button.mini { padding: 6px 10px; font-size: 13px; }
+button:disabled { opacity: .5; cursor: default; }
+details summary { cursor: pointer; }
+
+/* stats tiles */
+.stats, .sgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; margin: 10px 0; }
+.stats .card, .sgrid > div { text-align: center; background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+  padding: 12px; font-size: 13px; color: var(--muted); margin: 0; }
+.stats b, .sgrid > div > span:first-child { display: block; font-size: 26px; font-weight: 800; color: var(--ink); }
+
+/* tables and lists */
+table.users { width: 100%; border-collapse: collapse; font-size: 14px; }
+table.users td, table.users th { text-align: left; padding: 8px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+table.users th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
+.actions-row { display: flex; gap: 6px; flex-wrap: wrap; }
+ul.plain, ul.hist { list-style: none; padding: 0; margin: 0; }
+ul.hist > li { background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 14px 16px; margin-bottom: 10px; }
+ul.hist > li .mini { margin: 8px 6px 0 0; }
+
+/* badges and notes */
+.badge { display: inline-block; font-size: 12px; font-weight: 700; padding: 3px 10px; border-radius: 99px; background: var(--bg); color: var(--muted); }
+.badge.ok { background: var(--ok-bg); color: var(--ok); }
+.badge.bad { background: var(--bad-bg); color: var(--bad); }
+.badge.warn { background: var(--warn-bg); color: var(--warn); }
+.note { border-radius: 12px; padding: 10px 14px; margin: 8px 0; }
+.note.ok { background: var(--ok-bg); color: var(--ok); }
+.note.warn { background: var(--warn-bg); color: var(--warn); }
+.note.bad { background: var(--bad-bg); color: var(--bad); }
+.crit, .err { color: var(--bad); }
+.pw { font-family: ui-monospace, monospace; background: var(--warn-bg); color: var(--warn); padding: 2px 6px; border-radius: 6px; }
+
+/* visitor chart and bars (QuoteBakkie) */
+.chart { display: flex; align-items: flex-end; gap: 2px; height: 90px; margin: 8px 0 12px; border-bottom: 1px solid var(--line); }
+.chart i { flex: 1; background: var(--accent); border-radius: 3px 3px 0 0; min-height: 2px; }
+.chart i.s { background: var(--accent-dk); }
+.bars { list-style: none; padding: 0; margin: 6px 0 10px; font-size: 13px; }
+.bars li { display: grid; grid-template-columns: 1fr auto; gap: 6px; padding: 3px 4px; position: relative; isolation: isolate; }
+.bars li::before { content: ""; position: absolute; left: 0; top: 2px; bottom: 2px; width: var(--w); background: var(--accent-bg); border-radius: 4px; z-index: -1; }
+.editf { margin-top: 10px; border-top: 1px solid var(--line); padding-top: 8px; }
+
+/* the family login */
+.fa-login { max-width: 420px; margin: 40px auto; }
+.fa-login .logos { display: flex; gap: 18px; align-items: center; justify-content: center; margin: 4px 0 18px; flex-wrap: wrap; }
+.fa-login .logos img { height: 26px; width: auto; }
+.fa-login h1 { text-align: center; }
+.fa-login p.lead { text-align: center; color: var(--muted); margin: 0 0 16px; }
+.fa-login button.primary { width: 100%; margin-top: 6px; padding: 12px; font-size: 15px; }
+
+@media (max-width: 640px) {
+  .grid2, .two { grid-template-columns: 1fr; }
+  .fa-head { padding: 8px 12px; gap: 8px; } .fa-head .logo { height: 24px; }
+  main, .fa-main { padding: 14px 12px 40px; }
+  table.users, table.users tbody, table.users tr, table.users td { display: block; width: 100%; }
+  table.users tr:first-child { display: none; }
+  table.users tr { border-bottom: 1px solid var(--line); padding: 6px 0; } table.users td { border: 0; padding: 3px 0; }
+}

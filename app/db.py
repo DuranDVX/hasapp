@@ -89,6 +89,37 @@ class PasswordReset(Base):
     emailed: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class PlatformAdmin(Base):
+    """A Bakkie family admin (SiteBakkie and QuoteBakkie). Not a customer login."""
+    __tablename__ = "platform_admins"
+    id: Mapped[str] = mapped_column(String(16), primary_key=True, default=new_id)
+    email: Mapped[str] = mapped_column(String(200), unique=True, index=True)
+    name: Mapped[str] = mapped_column(String(200), default="")
+    pw_hash: Mapped[str] = mapped_column(String(200), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
+class AdminSession(Base):
+    __tablename__ = "admin_sessions"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    admin_id: Mapped[str] = mapped_column(ForeignKey("platform_admins.id"), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+
+
+class AdminTicket(Base):
+    """One-time: a set-password link ("setpw") or a hand-over to another app ("handoff:<app>")."""
+    __tablename__ = "admin_tickets"
+    token_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    admin_id: Mapped[str] = mapped_column(ForeignKey("platform_admins.id"), index=True)
+    purpose: Mapped[str] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    expires_at: Mapped[datetime] = mapped_column(DateTime)
+    used_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
+
 class Site(Base):
     __tablename__ = "sites"
     id: Mapped[str] = mapped_column(String(16), primary_key=True, default=new_id)

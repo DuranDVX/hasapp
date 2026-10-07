@@ -1,34 +1,29 @@
 <!doctype html>
-<html lang="en" data-theme="light">
+<html lang="en" data-app="sitebakkie">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="robots" content="noindex, nofollow">
 <title>SiteBakkie admin</title>
 <link rel="icon" href="/favicon.png">
-<link rel="stylesheet" href="/style.css">
-<style>
-  main { max-width: 1100px; padding-bottom: 40px; }
-  .stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; }
-  .stats .card { text-align: center; } .stats b { display: block; font-size: 26px; }
-  table.users { width: 100%; border-collapse: collapse; font-size: 14px; }
-  table.users td, table.users th { text-align: left; padding: 7px 6px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-  table.users th { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .4px; }
-  .actions-row { display: flex; gap: 6px; flex-wrap: wrap; }
-  .off { opacity: .55; }
-  .pw { font-family: ui-monospace, monospace; background: var(--amber-bg); color: var(--amber); padding: 2px 6px; border-radius: 6px; }
-</style>
+<link rel="stylesheet" href="/family-admin.css">
 </head>
 <body>
-<header><img class="brand-logo" src="/logo-head.png" alt="SiteBakkie" style="display:block"><span class="grow"></span><b>Admin</b>
-  <button class="small hidden" id="out" style="margin-left:8px">Log out</button></header>
+<header class="fa-head"><img class="logo" src="/logo-head.png" alt="SiteBakkie"><span class="fa-tag">Admin</span>
+  <nav class="fa-switch hidden" id="sw">
+    <a class="on" href="/admin.html"><span class="dot" style="background:var(--sb)"></span>SiteBakkie</a>
+    <button type="button" id="to-qb"><span class="dot" style="background:var(--qb)"></span>QuoteBakkie</button></nav>
+  <span class="fa-grow"></span><span class="fa-who" id="who"></span>
+  <button class="small hidden" id="out">Log out</button></header>
 <main id="view"></main>
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-let code = null, tok = null; try { code = localStorage.getItem("sb-admin"); tok = localStorage.getItem("sb-admin-token"); } catch {}
+let code = null, tok = null;
+try { code = localStorage.getItem("sb-admin"); tok = localStorage.getItem("bakkie-admin"); } catch {}
+const store = (k, v) => { try { v ? localStorage.setItem(k, v) : localStorage.removeItem(k); } catch {} };
 async function api(path, opts = {}) {
-  const h = { "Content-Type": "application/json" }; if (tok) h["X-Token"] = tok; if (code) h["X-Admin"] = code;
+  const h = { "Content-Type": "application/json" }; if (tok) h["X-Admin-Session"] = tok; if (code) h["X-Admin"] = code;
   const r = await fetch(path, { method: opts.method || (opts.json ? "POST" : "GET"), headers: h,
     body: opts.json ? JSON.stringify(opts.json) : undefined });
   const d = await r.json().catch(() => ({}));
@@ -36,41 +31,72 @@ async function api(path, opts = {}) {
   return d;
 }
 const fmt = (t) => t ? t.replace("T", " ") : "never";
+const wantApp = new URLSearchParams(location.search).get("to");   // QuoteBakkie sends you here to log in
+function chrome(on) {
+  $("#out").classList.toggle("hidden", !on); $("#sw").classList.toggle("hidden", !on);
+  if (!on) $("#who").textContent = "";
+}
+async function goQB() {
+  if (!tok) { location.href = "https://www.quotebakkie.co.za/admin.html"; return; }
+  try { const r = await api("/api/family/handoff", { json: { app: "quotebakkie" } }); location.href = r.url; }
+  catch (e) { alert(e.message); }
+}
+$("#to-qb").onclick = goQB;
+async function signedIn(d) {
+  tok = d.token; code = null; store("bakkie-admin", tok); store("sb-admin", null);
+  history.replaceState(null, "", "/admin.html");   // a page change tells the browser the login worked, so it offers to save
+  if (wantApp === "quotebakkie") return goQB();
+  load();
+}
 function login(msg = "") {
-  $("#out").classList.add("hidden");
-  $("#view").innerHTML = `<div class="page-head"><h1>Admin</h1><p>All companies and logins on SiteBakkie.</p></div>
-    <form class="card" id="al" style="max-width:420px" method="post" action="#">
+  chrome(false);
+  $("#view").innerHTML = `<form class="card fa-login" id="al" method="post" action="#">
+      <div class="logos"><img src="/logo-head.png" alt="SiteBakkie"><img src="/qb-logo.png" alt="QuoteBakkie"></div>
+      <h1>Bakkie admin</h1><p class="lead">One login for SiteBakkie and QuoteBakkie.</p>
       <label for="al-email">Email</label><input id="al-email" name="username" type="email" autocomplete="username" autocapitalize="off" required>
       <label for="al-pw">Password</label><input id="al-pw" name="password" type="password" autocomplete="current-password" required>
-      <button class="primary" type="submit">Log in</button><p class="crit small">${esc(msg)}</p>
-      <details class="small"><summary>Use the admin code instead</summary><input id="code" type="password" autocomplete="off" placeholder="Admin code">
+      <button class="primary" type="submit">Log in</button><p class="crit small center">${esc(msg)}</p>
+      <details class="small"><summary>Use the SiteBakkie admin code instead</summary><input id="code" type="password" autocomplete="off" placeholder="Admin code">
         <button class="small" type="button" id="go">Open</button></details></form>`;
   $("#al").onsubmit = async (e) => {
     e.preventDefault();
-    const r = await fetch("/api/admin/login", { method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ email: $("#al-email").value.trim(), password: $("#al-pw").value }) });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) return login(d.detail || "Could not log in.");
-    tok = d.token; code = null;
-    try { localStorage.setItem("sb-admin-token", tok); localStorage.removeItem("sb-admin"); } catch {}
-    history.replaceState(null, "", "/admin.html");   // a page change tells the browser the login worked, so it offers to save
-    load();
+    try { await signedIn(await api("/api/family/login", { json: { email: $("#al-email").value.trim(), password: $("#al-pw").value } })); }
+    catch (err) { login(err.message); }
   };
-  $("#go").onclick = () => { code = $("#code").value.trim(); tok = null; try { localStorage.setItem("sb-admin", code); } catch {} load(); };
+  $("#go").onclick = () => { code = $("#code").value.trim(); tok = null; store("sb-admin", code); store("bakkie-admin", null); load(); };
+}
+function setPassword(token, msg = "") {
+  chrome(false);
+  $("#view").innerHTML = `<form class="card fa-login" id="sp" method="post" action="#">
+      <div class="logos"><img src="/logo-head.png" alt="SiteBakkie"><img src="/qb-logo.png" alt="QuoteBakkie"></div>
+      <h1>Choose your password</h1><p class="lead">For the Bakkie admin login. Your browser can save it.</p>
+      <label for="sp-email">Email</label><input id="sp-email" name="username" type="email" autocomplete="username" autocapitalize="off" placeholder="info@sitebakkie.co.za" required>
+      <label for="sp-pw">New password (8 or more characters)</label><input id="sp-pw" name="new-password" type="password" autocomplete="new-password" required>
+      <label for="sp-pw2">Type it again</label><input id="sp-pw2" type="password" autocomplete="new-password" required>
+      <button class="primary" type="submit">Save and log in</button><p class="crit small center">${esc(msg)}</p></form>`;
+  api("/api/family/setpw-email?token=" + encodeURIComponent(token)).then((r) => { $("#sp-email").value = r.email; })
+    .catch((err) => { if (!msg) setPassword(token, err.message); });
+  $("#sp").onsubmit = async (e) => {
+    e.preventDefault();
+    if ($("#sp-pw").value !== $("#sp-pw2").value) return setPassword(token, "The two passwords are not the same.");
+    try { await signedIn(await api("/api/family/password", { json: { token, password: $("#sp-pw").value } })); }
+    catch (err) { setPassword(token, err.message); }
+  };
 }
 $("#out").onclick = () => {
-  if (tok) fetch("/api/logout", { method: "POST", headers: { "X-Token": tok } }).catch(() => {});
-  try { localStorage.removeItem("sb-admin"); localStorage.removeItem("sb-admin-token"); } catch {} code = tok = null; login();
+  if (tok) api("/api/family/logout", { json: {} }).catch(() => {});
+  store("sb-admin", null); store("bakkie-admin", null); code = tok = null; login();
 };
 let D = null;
 async function load() {
   try { D = await api("/api/admin/overview"); } catch (e) {
-    if (e.status === 401) { tok = code = null; try { localStorage.removeItem("sb-admin"); localStorage.removeItem("sb-admin-token"); } catch {} }
+    if (e.status === 401) { tok = code = null; store("sb-admin", null); store("bakkie-admin", null); }
     return login(e.status === 401 ? "Log in again." : e.message);
   }
-  $("#out").classList.remove("hidden");
+  chrome(true);
+  if (tok) api("/api/family/me").then((m) => { $("#who").textContent = m.email; }).catch(() => {});
   const t = D.totals;
-  $("#view").innerHTML = `<div class="page-head"><h1>Admin</h1><p>Every company and login on SiteBakkie. Temporary passwords show once; give them to the person.</p></div>
+  $("#view").innerHTML = `<div class="page-head"><h1>SiteBakkie</h1><p>Every company and login on SiteBakkie. Temporary passwords show once; give them to the person.</p></div>
     <div class="stats">${[["Companies", t.companies], ["Logins", t.users], ["Sites", t.sites], ["Workers", t.workers], ["Records", t.records], ["Records, 7 days", t.records_7d]]
       .map(([l, v]) => `<div class="card"><b>${v}</b><span class="muted small">${l}</span></div>`).join("")}</div>
     ${D.resets.filter((r) => !r.used && !r.emailed).length ? `<h2>Password help</h2><div class="card"><p class="small muted">These people asked for a new password and email is not set up. Make a new password and send it to them.</p>
@@ -140,7 +166,11 @@ document.addEventListener("change", async (e) => {
   const id = e.target.dataset.role; if (!id) return;
   try { await api(`/api/admin/users/${id}`, { method: "PUT", json: { role: e.target.value } }); } catch (err) { alert(err.message); load(); }
 });
-code || tok ? load() : login();
+const setpw = location.hash.match(/^#setpw\/(.+)$/);
+if (setpw) setPassword(setpw[1]);
+else if (tok && wantApp === "quotebakkie") goQB();
+else if (code || tok) load();
+else login();
 </script>
 </body>
 </html>

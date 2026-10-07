@@ -419,14 +419,30 @@ def test_company_defaults_copy_site_and_plan_without_spec(co, monkeypatch):
     assert "None provided for this site" in text and "provided no health and safety" in text
 
 
-def test_admin_login_with_own_password(monkeypatch):
-    email = f"boss-{uuid.uuid4().hex[:6]}@test.co"
-    assert client.post("/api/signup", json={"company": "Boss Co", "name": "Boss", "email": email,
-                                            "password": "boss-pass-1"}).status_code == 200
-    assert client.post("/api/admin/login", json={"email": email, "password": "boss-pass-1"}).status_code == 403
-    monkeypatch.setattr(server, "ADMIN_EMAILS", {email})
-    assert client.post("/api/admin/login", json={"email": email, "password": "wrong-pass"}).status_code == 401
-    tok = client.post("/api/admin/login", json={"email": email.upper(), "password": "boss-pass-1"}).json()["token"]
-    assert client.get("/api/admin/overview", headers={"X-Token": tok}).status_code == 200
-    monkeypatch.setattr(server, "ADMIN_EMAILS", set())
-    assert client.get("/api/admin/overview", headers={"X-Token": tok}).status_code == 401
+def test_family_admin_login_setpw_handoff(monkeypatch):
+    from app import auth
+    email = f"admin-{uuid.uuid4().hex[:6]}@test.co"
+    monkeypatch.setenv("ADMIN_RESET_EMAIL", email)
+    tickets = []
+    real = server._ticket
+    monkeypatch.setattr(server, "_ticket", lambda *a: tickets.append(real(*a)) or tickets[-1])
+    server._reset_on_start()                                   # makes the account and a set-password link
+    assert client.post("/api/family/login", json={"email": email, "password": "x" * 10}).status_code == 401
+    r = client.post("/api/family/password", json={"token": tickets[0], "password": "fam-pass-123"})
+    assert r.status_code == 200 and r.json()["email"] == email
+    assert client.post("/api/family/password", json={"token": tickets[0], "password": "again-pass-1"}).status_code == 400
+    tok = client.post("/api/family/login", json={"email": email.upper(), "password": "fam-pass-123"}).json()["token"]
+    h = {"X-Admin-Session": tok}
+    assert client.get("/api/admin/overview", headers=h).status_code == 200
+    assert client.get("/api/admin/overview", headers={"X-Admin-Session": "nope"}).status_code == 401
+    me_ = client.get("/api/family/me", headers=h).json()
+    assert [a["key"] for a in me_["apps"]] == ["sitebakkie", "quotebakkie"]
+    url = client.post("/api/family/handoff", json={"app": "quotebakkie"}, headers=h).json()["url"]
+    ticket = url.split("#sso=")[1]
+    assert client.post("/api/family/redeem", json={"ticket": ticket, "app": "sitebakkie"}).status_code == 401  # wrong app
+    url = client.post("/api/family/handoff", json={"app": "quotebakkie"}, headers=h).json()["url"]
+    ticket = url.split("#sso=")[1]
+    assert client.post("/api/family/redeem", json={"ticket": ticket, "app": "quotebakkie"}).json()["email"] == email
+    assert client.post("/api/family/redeem", json={"ticket": ticket, "app": "quotebakkie"}).status_code == 401  # once
+    client.post("/api/family/logout", headers=h)
+    assert client.get("/api/admin/overview", headers=h).status_code == 401
