@@ -347,3 +347,26 @@ Vertical 9:16 photorealistic cinematic commercial shot, 5 seconds. Late morning 
 ```
 Vertical 9:16 photorealistic cinematic aerial drone shot, 6 seconds. Golden hour over a residential construction site on a hillside in Plettenberg Bay, South Africa. Below: the half-built double-storey brick house with steel scaffolding, neat brick stacks, workers in orange and yellow hard hats packing up for the day, and a white double-cab bakkie driving slowly out of the site gate onto a quiet road. Beyond the site: the Keurbooms lagoon and the Indian Ocean glowing in warm evening light, green hills and the Garden Route coastline. Camera: the drone rises slowly and tilts forward, revealing the lagoon and ocean behind the site, smooth and stable. Lighting: warm low sun, long shadows, orange sky melting into deep navy at the top of the frame. Mood: calm, proud, a good day's work done. Avoid: readable text, logos, signboards with writing, watermarks, fast or shaky camera moves.
 ```
+
+---
+
+## 6. More characters (make a reference image of each; swap into any scene)
+
+In a scene prompt, replace Naledi's description with the chosen person's and attach their
+reference image. Suggested cast: Pieter in Scenes 1–2, Sipho leading the toolbox talk
+(Scene 4), Anna with the inspector (Scene 7).
+
+### Pieter: builder and owner (white man, early 50s)
+```
+Photorealistic 9:16 portrait, full body, of Pieter, a South African building contractor and business owner in his early 50s, white man with a sun-weathered face, short greying hair and a neat grey beard, standing on a residential construction site in Plettenberg Bay at golden morning light. He wears a white hard hat, a khaki long-sleeved work shirt with the sleeves rolled up, an orange high-visibility reflective vest, dark khaki work trousers and brown leather safety boots, and holds a modern smartphone in his left hand. Behind him, softly out of focus: his white double-cab bakkie, a half-built double-storey brick house with steel scaffolding and brick stacks. Experienced, practical, quietly confident expression, slight smile, looking at the camera. Natural skin texture with sun lines, cinematic shallow depth of field, warm orange highlights and deep navy shadows. No text, no logos, no writing on clothing or vehicles.
+```
+
+### Sipho: foreman (Black man, late 20s)
+```
+Photorealistic 9:16 portrait, full body, of Sipho, a South African construction foreman in his late 20s, Black man with a short fade haircut and a warm, wide grin, strong build, standing on a residential construction site in Plettenberg Bay at golden morning light. He wears a yellow hard hat, navy work overalls with the top half tied around his waist over a grey T-shirt, a bright orange high-visibility reflective vest on top, and black leather safety boots; work gloves tucked into his vest pocket, a smartphone in his right hand. Behind him, softly out of focus: workers in hard hats, a yellow TLB and a barricaded trench, a half-built brick house with scaffolding. Energetic, friendly, can-do expression, looking at the camera. Natural skin texture, cinematic shallow depth of field, warm orange highlights and deep navy shadows. No text, no logos, no writing on clothing or vehicles.
+```
+
+### Anna: safety officer (white woman, early 30s)
+```
+Photorealistic 9:16 portrait, full body, of Anna, a South African construction health and safety officer in her early 30s, white woman with light brown hair in a low ponytail under her hard hat, a few freckles, thin black-framed glasses, standing on a residential construction site in Plettenberg Bay at golden morning light. She wears a white hard hat, a navy long-sleeved work shirt, a bright orange high-visibility reflective vest, dark navy work trousers and brown leather safety boots, and holds a smartphone in one hand, with a pen clipped to her vest pocket. Behind her, softly out of focus: a steel scaffold with guardrails and toe boards, workers in hard hats, a half-built double-storey brick house. Sharp, approachable, attentive expression, looking at the camera. Natural skin texture, cinematic shallow depth of field, warm orange highlights and deep navy shadows. No text, no logos, no writing on clothing or vehicles.
+```
