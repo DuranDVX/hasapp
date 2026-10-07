@@ -284,3 +284,66 @@ Calm, proud, satisfied mood.
 4. Music: light, warm acoustic or soft electronic, ducked under the voice (about −18 dB while
    the voice speaks).
 5. Export 1080×1920, H.264, 30 fps. Make a 1:1 crop of the app part for Facebook feeds if needed.
+
+
+---
+
+## 5. Full prompts, one per scene (self-contained: paste one block per clip)
+
+These repeat the style, the character and what to avoid inside every prompt, so each block
+works on its own in any AI video tool (Runway, Kling, Veo, Sora…).
+
+### Character reference image (make first; use it as the reference in scenes 1, 2, 4 and 7)
+```
+Photorealistic 9:16 portrait, full body, of Naledi, a confident South African site manager in her mid-30s, Black woman with short natural hair, standing on a residential construction site in Plettenberg Bay at golden morning light. She wears an orange hard hat, a navy work jacket over a bright orange high-visibility reflective vest, dark grey work trousers and brown leather safety boots, and holds a modern black smartphone in her right hand. Behind her, softly out of focus: a white double-cab bakkie (South African pickup truck) with an orange hard hat on the dashboard, a half-built double-storey brick house with steel scaffolding. Friendly, capable, calm expression, looking at the camera. Natural skin texture, cinematic shallow depth of field, warm orange highlights and deep navy shadows. No text, no logos, no writing on clothing or vehicles.
+```
+
+### Scene 1: The problem (5 s)
+```
+Vertical 9:16 photorealistic cinematic commercial shot, 5 seconds. Evening, after hours, inside a small steel site-office container on a residential construction site in Plettenberg Bay, South Africa. Naledi, a South African site manager in her mid-30s, short natural hair, navy work jacket over an orange high-visibility vest (her orange hard hat lies on the desk beside her), sits at a cluttered desk under one warm desk lamp. The desk is buried in thick lever-arch files, loose paper forms, a clipboard and a cold mug of coffee. Action: she flips a heavy file open, scans a page, pushes it aside, rubs her eyes with both hands and sighs, shoulders dropping. Through a small window behind her, the empty site and the dark scaffold sit in blue dusk light. Camera: slow push-in from a medium shot to a close-up of her tired face, slight handheld movement. Lighting: warm lamp light on her face, cool blue dusk from the window, deep navy shadows. Mood: tired, overwhelmed, end of a long day. Avoid: any readable text on files, papers, screens or walls, logos, captions, watermarks, extra people, cartoon look.
+```
+
+### Scene 2: Say the day (5 s)
+```
+Vertical 9:16 photorealistic cinematic commercial shot, 5 seconds. Early morning golden hour on a residential construction site in Plettenberg Bay, South Africa: a half-built double-storey brick house with steel scaffolding (guardrails and toe boards), brick stacks and a sand heap. Naledi, a confident South African site manager in her mid-30s, short natural hair, orange hard hat, navy work jacket over an orange high-visibility vest, brown safety boots, walks onto site past her white double-cab bakkie holding a coffee mug. Action: she stops, lifts her smartphone close to her mouth and speaks into it naturally and confidently, as if leaving a voice note, glancing up at the scaffold and pointing towards it once with the coffee hand, then smiles. In soft focus behind her, workers in hard hats, reflective vests and safety boots arrive and unload tools. The phone screen faces away or shows only a plain soft white glow. Camera: slow arc around her from a low angle, smooth handheld. Lighting: warm low sun behind her, rim light on her hard hat, long shadows, light dust in the air. Mood: in control, easy, optimistic. Avoid: readable text anywhere, logos, writing on clothing or vehicles, anyone without a hard hat or vest, captions, watermarks.
+```
+
+### Scene 3: Phone close-up for the app screens (8–10 s)
+```
+Vertical 9:16 photorealistic cinematic close-up, 8 to 10 seconds, locked and steady. Over-the-shoulder shot of a site manager in an orange hard hat and orange high-visibility vest, holding a modern black smartphone upright in her right hand at chest height, screen facing the camera and filling about one third of the frame. The phone screen is completely plain: a clean, bright, evenly lit white glow with sharp straight edges and no reflections, no writing, no icons. Action: the phone stays still and flat to the camera; her thumb hovers near the bottom of the screen, taps once, then rests on the phone's edge. Background in soft bokeh: brick walls, steel scaffolding, two workers in hard hats and vests moving. Camera: very slow push-in, no shake, no rotation of the phone. Lighting: warm golden morning light from the side, no glare on the screen. Purpose: the screen will be replaced with an app screenshot in editing, so keep it flat, sharp-edged, evenly lit and unobstructed. Avoid: any content on the screen, fingers covering the screen, tilting the phone, screen glare, text, logos, watermarks.
+```
+
+### Scene 4: Toolbox talk (5 s)
+```
+Vertical 9:16 photorealistic cinematic commercial shot, 5 seconds. Morning on a residential construction site in Plettenberg Bay, South Africa, next to a white double-cab bakkie. Six South African construction workers of different ages stand in a relaxed half-circle, all wearing hard hats (yellow and white), orange or yellow reflective vests, work clothes and safety boots. Naledi, the site manager in her mid-30s, short natural hair, orange hard hat, navy jacket over an orange high-visibility vest, holds her smartphone up in the middle of the group; the phone plays a short safety talk out loud. Action: the workers listen; an older worker nods slowly and says a few words; two younger workers smile and nod; one points towards the trench area in the background. The phone screen is a plain white glow. Camera: slow sideways dolly across the faces, then settling on the group, shallow depth of field. Lighting: warm low sun from behind the group, long shadows, golden dust in the air. Mood: respectful, engaged, team spirit. Avoid: anyone without a hard hat, vest or boots, readable text, logos or writing on clothing, captions, watermarks.
+```
+
+### Scene 5: Signing on the phone (5 s)
+```
+Vertical 9:16 photorealistic cinematic extreme close-up, 5 seconds. A construction worker's dusty right hand, his work glove pulled off and tucked into the pocket of his orange reflective vest, signs with one finger on a smartphone screen. The phone is held flat and steady by a colleague whose orange high-visibility sleeve is visible. The phone screen is a plain bright white glow with no writing, no lines, no icons. Action: the finger traces a smooth, natural signature stroke across the screen, then lifts away. In the soft-focus background: the worker's smiling face under a yellow hard hat, scaffolding and a brick wall behind him. Camera: macro-style close-up, very slow push-in, shallow depth of field. Lighting: golden morning light, warm skin tones, soft highlights on the phone edges. Mood: simple, quick, done. Avoid: any visible letters, words or signature lines on the screen, glare, logos, captions, watermarks.
+```
+
+### Scene 6a: Excavation, done safely (4 s)
+```
+Vertical 9:16 photorealistic cinematic shot, 4 seconds. A residential construction site in Plettenberg Bay, South Africa, morning. A yellow TLB (backhoe loader) digs a shallow sewer trench along the site boundary. The trench is fully barricaded with orange mesh safety barrier on steel posts; the soil spoil is heaped about one metre back from the trench edge. A banksman in a hard hat, orange reflective vest and safety boots stands outside the barrier and gives a clear hand signal to the operator, who wears a hard hat in the cab. Nobody is inside the trench. Camera: slow tracking shot along the barrier at waist height, the TLB bucket moving in the background. Lighting: warm golden morning light, dust catching the sun. Mood: controlled, professional. Avoid: any person inside or standing at the edge of the trench, the bucket swinging over people, missing barriers, missing PPE, readable text, logos on the machine, watermarks.
+```
+
+### Scene 6b: Scaffold and brickwork, done safely (4 s)
+```
+Vertical 9:16 photorealistic cinematic shot, 4 seconds. A half-built double-storey brick house on a residential construction site in Plettenberg Bay, South Africa. A bricklayer in a white hard hat, orange reflective vest, safety harness and safety boots lays bricks on the first-floor wall, working from a steel tube-and-clamp scaffold with full guardrails, mid-rails and toe boards on every working level and a proper access ladder. A labourer in a hard hat and vest passes bricks up from a loading bay. Action: the bricklayer butters a brick, sets it and taps it level with the trowel handle. Camera: slow crane movement upwards along the outside of the scaffold, ending level with the bricklayer, with blue sky behind. Lighting: golden morning sun, warm brick tones. Mood: skilled, steady, safe. Avoid: missing guardrails or toe boards, anyone without a hard hat, loose materials at edges, readable text, logos, watermarks.
+```
+
+### Scene 6c: Plant check before work (4 s)
+```
+Vertical 9:16 photorealistic cinematic shot, 4 seconds. Early morning on a residential construction site in Plettenberg Bay, South Africa. A TLB operator in his 40s, wearing a yellow hard hat, orange reflective vest, overalls and safety boots, walks around his parked yellow TLB before starting work. Action: he crouches to look at a front tyre, runs his hand along a hydraulic hose, then stands, holds up his smartphone and taps it once, nodding. The phone screen is a plain white glow. Camera: medium shot, slow push-in, then a gentle drift to show the machine. Lighting: soft early golden light, dew and slight mist in the air. Mood: careful, routine, responsible. Avoid: the engine running with someone near the bucket, missing PPE, readable text, logos or brand names on the machine, watermarks.
+```
+
+### Scene 7: The inspector arrives (5 s)
+```
+Vertical 9:16 photorealistic cinematic commercial shot, 5 seconds. Late morning at the gate of a residential construction site in Plettenberg Bay, South Africa: a steel mesh site fence, the half-built house and scaffolding behind. A serious, experienced South African labour inspector in his 50s, wearing a navy jacket, white hard hat, reflective vest and safety boots, carrying a clipboard, meets Naledi, the site manager in her mid-30s, short natural hair, orange hard hat, navy jacket over an orange high-visibility vest. Action: she greets him with a confident smile and turns her smartphone to show him the screen; he leans in, studies it closely, raises his eyebrows, then nods slowly and gives a small approving smile, lowering his clipboard. The phone screen is a plain white glow. Camera: slow dolly from the phone in her hand up to his face, shallow depth of field. Lighting: bright late-morning sun, warm tones, navy shadows. Mood: relief, quiet pride, respect. Avoid: readable text on the clipboard, the phone, the fence or clothing, logos, uniforms with badges, captions, watermarks.
+```
+
+### Scene 8: Drone ending (6 s)
+```
+Vertical 9:16 photorealistic cinematic aerial drone shot, 6 seconds. Golden hour over a residential construction site on a hillside in Plettenberg Bay, South Africa. Below: the half-built double-storey brick house with steel scaffolding, neat brick stacks, workers in orange and yellow hard hats packing up for the day, and a white double-cab bakkie driving slowly out of the site gate onto a quiet road. Beyond the site: the Keurbooms lagoon and the Indian Ocean glowing in warm evening light, green hills and the Garden Route coastline. Camera: the drone rises slowly and tilts forward, revealing the lagoon and ocean behind the site, smooth and stable. Lighting: warm low sun, long shadows, orange sky melting into deep navy at the top of the frame. Mood: calm, proud, a good day's work done. Avoid: readable text, logos, signboards with writing, watermarks, fast or shaky camera moves.
+```
